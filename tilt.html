@@ -14,10 +14,7 @@
   input,select,button{font-size:1rem;padding:.6rem .7rem;border:1px solid #ccc;border-radius:10px}
   button{cursor:pointer}
   .num{font-variant-numeric:tabular-nums}
-  .ok{color:#0a7f3f}
-  .warn{color:#c75000}
-  .err{color:#b00020}
-  .mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  .ok{color:#0a7f3f}.warn{color:#c75000}.err{color:#b00020}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
   .small{font-size:.85rem;opacity:.75}
 </style>
 </head>
@@ -25,7 +22,8 @@
 <nav>
   <a href="index.html">Home</a> |
   <a href="tilt.html"><b>Tilt Control</b></a> |
-  <a href="led.html">LED Test</a>
+  <a href="led.html">LED Test</a> |
+<a href="https://utakik.github.io/robot-notes-/" target="_blank" rel="noopener">Robot Notes</a>
 </nav>
  
 <h1>スマホの傾きを送る（Tilt Control）</h1>
@@ -52,7 +50,7 @@
     </div>
     <div id="http-box" style="display:none">
 HTTP ベースURL（例: http://192.168.0.50）</label><br/>
-<input id="http-url" size="34" placeholder="http://esp32.local" />
+<input id="http-url? size="34? placeholder="http://esp32.local" />
     </div>
   </div>
   <div class="small">状態: <span id="conn" class="mono">-</span></div>
@@ -100,7 +98,6 @@ HTTP ベースURL（例: http://192.168.0.50）</label><br/>
  
 <script>
 (() => {
-  // UI 要素
   const btnPerm = document.getElementById('btn-perm');
   const permStatus = document.getElementById('perm-status');
   const modeSel = document.getElementById('mode');
@@ -114,7 +111,6 @@ HTTP ベースURL（例: http://192.168.0.50）</label><br/>
   const alphaEl = document.getElementById('alpha');
   const gainEl = document.getElementById('gain');
  
-  // 表示
   const oAlpha = document.getElementById('oAlpha');
   const oBeta  = document.getElementById('oBeta');
   const oGamma = document.getElementById('oGamma');
@@ -125,26 +121,106 @@ HTTP ベースURL（例: http://192.168.0.50）</label><br/>
   const syEl = document.getElementById('sy');
   const szEl = document.getElementById('sz');
  
-  // センサー値
   let ori = {alpha:0,beta:0,gamma:0};
   let acc = {x:0,y:0,z:0};
- 
-  // スムージング用
   let filt = {x:0,y:0,z:0};
   const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
  
-  // WebSocket
   let ws = null;
-  function setConn(status, cls='') {
-    connEl.textContent = status;
-    connEl.className = 'mono ' + cls;
-  }
+  function setConn(status, cls=''){ connEl.textContent=status; connEl.className='mono '+cls; }
  
-  // 権限リクエスト（iOS）
   btnPerm.onclick = async () => {
     try {
       let ok1 = true, ok2 = true;
       if (typeof DeviceMotionEvent !== 'undefined' &&
           typeof DeviceMotionEvent.requestPermission === 'function') {
-        ok1 = (await DeviceMotionEvent
- 
+        ok1 = (await DeviceMotionEvent.requestPermission()) === 'granted';
+      }
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        ok2 = (await DeviceOrientationEvent.requestPermission()) === 'granted';
+      }
+      if (ok1 && ok2){ permStatus.textContent='許可されました ✅'; permStatus.className='small ok'; startSensors(); }
+      else { permStatus.textContent='許可されませんでした ❌'; permStatus.className='small err'; }
+    } catch(e) {
+      permStatus.textContent='この端末は許可不要です ✅'; permStatus.className='small ok'; startSensors();
+    }
+  };
+ 
+  function startSensors(){
+    window.addEventListener('deviceorientation',(e)=>{
+      if (e.alpha!=null) ori.alpha=e.alpha;
+      if (e.beta !=null) ori.beta =e.beta;
+      if (e.gamma!=null) ori.gamma=e.gamma;
+      oAlpha.textContent=ori.alpha.toFixed(1);
+      oBeta.textContent =ori.beta.toFixed(1);
+      oGamma.textContent=ori.gamma.toFixed(1);
+    },true);
+ 
+    window.addEventListener('devicemotion',(e)=>{
+      const a=e.accelerationIncludingGravity||e.acceleration||{x:0,y:0,z:0};
+      acc.x=a.x||0; acc.y=a.y||0; acc.z=a.z||0;
+      axEl.textContent=acc.x.toFixed(3);
+      ayEl.textContent=acc.y.toFixed(3);
+      azEl.textContent=acc.z.toFixed(3);
+    },true);
+ 
+    tick();
+  }
+ 
+  async function tick(){
+    const dt=parseInt(intervalEl.value||'50',10);
+    const a =parseFloat(alphaEl.value ||'0.15');
+    const g =parseFloat(gainEl .value ||'1');
+ 
+    filt.x += a*((ori.gamma*g)-filt.x);
+    filt.y += a*((ori.beta *g)-filt.y);
+    filt.z += a*((ori.alpha*g)-filt.z);
+ 
+    const sx=clamp(filt.x,-90,90);
+    const sy=clamp(filt.y,-90,90);
+    const sz=((filt.z%360)+360)%360;
+ 
+    sxEl.textContent=sx.toFixed(1);
+    syEl.textContent=sy.toFixed(1);
+    szEl.textContent=sz.toFixed(1);
+ 
+    if (modeSel.value==='ws'){
+      if (ws && ws.readyState===1){ ws.send(JSON.stringify({x:sx,y:sy,z:sz})); }
+    } else {
+      const base=(httpUrl.value||'').trim();
+      if (base){
+        const u=`${base.replace(/\/$/,'')}/tilt?x=${sx.toFixed(1)}&y=${sy.toFixed(1)}&z=${sz.toFixed(1)}`;
+        fetch(u).catch(()=>{});
+      }
+    }
+    setTimeout(tick,dt);
+  }
+ 
+  modeSel.onchange=()=>{
+    const m=modeSel.value;
+wsBox.style.display=(m==='ws')?'':'none';
+httpBox.style.display=(m==='http')?'':'none';
+    setConn('-', '');
+  };
+ 
+  btnWS.onclick=()=>{
+    if (ws && ws.readyState===1){ ws.close(); return; }
+    const url=(wsUrl.value||'').trim();
+    if (!url){ alert('WebSocketのURLを入力してください（例: ws://192.168.0.50:81）'); return; }
+    try{
+      ws=new WebSocket(url);
+      setConn('接続中...','warn');
+      ws.onopen =()=>setConn('接続中（OPEN）','ok');
+      ws.onclose=()=>setConn('切断','');
+      ws.onerror=()=>setConn('エラー','err');
+      ws.onmessage=(ev)=>{/* ESP32からの返信を扱うならここ */}
+    }catch(e){ setConn('URLエラー','err'); }
+  };
+ 
+  setConn('-', '');
+})();
+</script>
+ 
+</body>
+</html>
