@@ -1,6 +1,127 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LED Test – Himo Robot</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;line-height:1.5}
+  nav a{margin-right:8px}
+  .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}
+  input,select,button{font-size:1rem;padding:.6rem .7rem;border:1px solid #ccc;border-radius:10px}
+  button{cursor:pointer}
+  .mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  .ok{color:#0a7f3f}.warn{color:#c75000}.err{color:#b00020}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+</style>
+</head>
+<body>
 <nav>
-<a href="index.html">Home</a> |
-<a href="tilt.html">Tilt Control</a> |
-<a href="led.html">LED Test</a>
+  <a href="index.html">Home</a> |
+  <a href="tilt.html">Tilt Control</a> |
+  <a href="led.html"><b>LED Test</b></a> |
+<a href="https://utakik.github.io/robot-notes-/" target="_blank" rel="noopener">Robot Notes</a>
 </nav>
- 
+ 
+<h1>LED テスト</h1>
+ 
+<div class="card">
+  <div class="row">
+    <div>
+      <label>送信方式</label><br/>
+      <select id="mode">
+        <option value="ws">WebSocket（低遅延）</option>
+        <option value="http">HTTP（/led?on=&v=）</option>
+      </select>
+    </div>
+    <div id="ws-box">
+      <label>WS サーバー</label><br/>
+      <input id="ws-url" size="34" placeholder="ws://esp32.local:81" />
+      <button id="btn-ws">接続/切断</button>
+    </div>
+    <div id="http-box" style="display:none">
+      <label>HTTP ベースURL</label><br/>
+<input id="http-url? size="34? placeholder="http://esp32.local" />
+    </div>
+  </div>
+  <div>状態: <span id="conn" class="mono">-</span></div>
+</div>
+ 
+<div class="card">
+  <div class="row">
+    <button id="btn-on">ON</button>
+    <button id="btn-off">OFF</button>
+    <label>明るさ: <span id="val">128</span></label>
+    <input id="range" type="range" min="0" max="255" value="128" />
+    <button id="btn-send">送信</button>
+  </div>
+  <p class="mono" id="last">-</p>
+</div>
+ 
+<script>
+(() => {
+  const modeSel = document.getElementById('mode');
+  const wsBox = document.getElementById('ws-box');
+  const httpBox = document.getElementById('http-box');
+  const wsUrl = document.getElementById('ws-url');
+  const httpUrl = document.getElementById('http-url');
+  const btnWS = document.getElementById('btn-ws');
+  const connEl = document.getElementById('conn');
+  const btnOn = document.getElementById('btn-on');
+  const btnOff = document.getElementById('btn-off');
+  const range = document.getElementById('range');
+  const val = document.getElementById('val');
+  const btnSend = document.getElementById('btn-send');
+  const last = document.getElementById('last');
+ 
+  let ws=null, led=1, pwm=128;
+  function setConn(s,cls=''){ connEl.textContent=s; connEl.className='mono '+cls; }
+  function updateLabel(){ val.textContent=pwm; }
+ 
+  range.oninput=()=>{ pwm=parseInt(range.value,10); updateLabel(); };
+ 
+  function send(){
+    const payload = {led, pwm};
+    last.textContent = 'send: '+JSON.stringify(payload);
+    if (modeSel.value==='ws'){
+      if (ws && ws.readyState===1) ws.send(JSON.stringify(payload));
+    } else {
+      const base=(httpUrl.value||'').trim();
+      if (!base) return;
+      const u = `${base.replace(/\/$/,'')}/led?on=${led}&v=${pwm}`;
+      fetch(u).catch(()=>{});
+    }
+  }
+ 
+  btnOn.onclick = ()=>{ led=1; send(); };
+  btnOff.onclick= ()=>{ led=0; send(); };
+  btnSend.onclick=()=> send();
+ 
+  modeSel.onchange=()=>{
+    const m=modeSel.value;
+wsBox.style.display=(m==='ws')?'':'none';
+httpBox.style.display=(m==='http')?'':'none';
+    setConn('-', '');
+  };
+ 
+  btnWS.onclick=()=>{
+    if (ws && ws.readyState===1){ ws.close(); return; }
+    const url=(wsUrl.value||'').trim();
+    if (!url){ alert('WebSocketのURLを入力してください（例: ws://192.168.0.50:81）'); return; }
+    try{
+      ws=new WebSocket(url);
+      setConn('接続中...','warn');
+      ws.onopen =()=>setConn('接続中（OPEN）','ok');
+      ws.onclose=()=>setConn('切断','');
+      ws.onerror=()=>setConn('エラー','err');
+      ws.onmessage=(ev)=>{/* ESP32側からの返信があればここ */}
+    }catch(e){ setConn('URLエラー','err'); }
+  };
+ 
+  setConn('-', '');
+  updateLabel();
+})();
+</script>
+ 
+</body>
+</html>
