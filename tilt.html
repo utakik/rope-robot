@@ -1,6 +1,150 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Tilt Control – Himo Robot</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;line-height:1.5}
+  h1{font-size:1.4rem;margin:0 0 12px}
+  nav a{margin-right:8px}
+  .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  label{font-size:.9rem}
+  input,select,button{font-size:1rem;padding:.6rem .7rem;border:1px solid #ccc;border-radius:10px}
+  button{cursor:pointer}
+  .num{font-variant-numeric:tabular-nums}
+  .ok{color:#0a7f3f}
+  .warn{color:#c75000}
+  .err{color:#b00020}
+  .mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  .small{font-size:.85rem;opacity:.75}
+</style>
+</head>
+<body>
 <nav>
-<a href="index.html">Home</a> |
-<a href="tilt.html">Tilt Control</a> |
-<a href="led.html">LED Test</a>
+  <a href="index.html">Home</a> |
+  <a href="tilt.html"><b>Tilt Control</b></a> |
+  <a href="led.html">LED Test</a>
 </nav>
+ 
+<h1>スマホの傾きを送る（Tilt Control）</h1>
+ 
+<div class="card">
+  <p class="small">iOS はセンサー利用前に許可が必要です。</p>
+  <button id="btn-perm">センサーの使用を許可する</button>
+  <span id="perm-status" class="small"></span>
+</div>
+ 
+<div class="card">
+  <div class="row">
+    <div>
+      <label>送信方式</label><br/>
+      <select id="mode">
+        <option value="ws">WebSocket（低遅延）</option>
+        <option value="http">HTTP（/tilt?x=&y=&z=）</option>
+      </select>
+    </div>
+    <div id="ws-box">
+      <label>WS サーバー（例: ws://192.168.0.50:81）</label><br/>
+      <input id="ws-url" size="34" placeholder="ws://esp32.local:81" />
+      <button id="btn-ws">接続/切断</button>
+    </div>
+    <div id="http-box" style="display:none">
+HTTP ベースURL（例: http://192.168.0.50）</label><br/>
+<input id="http-url" size="34" placeholder="http://esp32.local" />
+    </div>
+  </div>
+  <div class="small">状態: <span id="conn" class="mono">-</span></div>
+</div>
+ 
+<div class="card">
+  <div class="row">
+    <div>
+      <label>送信間隔 (ms)</label><br/>
+      <input id="interval" type="number" value="50" min="16" step="1" />
+    </div>
+    <div>
+      <label>スムージング</label><br/>
+      <input id="alpha" type="number" value="0.15" step="0.05" min="0" max="0.9" />
+    </div>
+    <div>
+      <label>感度（倍率）</label><br/>
+      <input id="gain" type="number" value="1.0" step="0.1" min="0.1" max="5" />
+    </div>
+  </div>
+</div>
+ 
+<div class="card">
+  <div class="row">
+    <div>
+      <b>傾き（DeviceOrientation）</b><br/>
+      alpha(方位): <span id="oAlpha" class="num mono">-</span><br/>
+      beta(前後): <span id="oBeta" class="num mono">-</span><br/>
+      gamma(左右): <span id="oGamma" class="num mono">-</span>
+    </div>
+    <div>
+      <b>加速度（DeviceMotion）</b><br/>
+      ax: <span id="ax" class="num mono">-</span><br/>
+      ay: <span id="ay" class="num mono">-</span><br/>
+      az: <span id="az" class="num mono">-</span>
+    </div>
+    <div>
+      <b>送信中の値</b><br/>
+      x: <span id="sx" class="num mono">-</span><br/>
+      y: <span id="sy" class="num mono">-</span><br/>
+      z: <span id="sz" class="num mono">-</span>
+    </div>
+  </div>
+</div>
+ 
+<script>
+(() => {
+  // UI 要素
+  const btnPerm = document.getElementById('btn-perm');
+  const permStatus = document.getElementById('perm-status');
+  const modeSel = document.getElementById('mode');
+  const wsBox = document.getElementById('ws-box');
+  const httpBox = document.getElementById('http-box');
+  const wsUrl = document.getElementById('ws-url');
+  const httpUrl = document.getElementById('http-url');
+  const btnWS = document.getElementById('btn-ws');
+  const connEl = document.getElementById('conn');
+  const intervalEl = document.getElementById('interval');
+  const alphaEl = document.getElementById('alpha');
+  const gainEl = document.getElementById('gain');
+ 
+  // 表示
+  const oAlpha = document.getElementById('oAlpha');
+  const oBeta  = document.getElementById('oBeta');
+  const oGamma = document.getElementById('oGamma');
+  const axEl = document.getElementById('ax');
+  const ayEl = document.getElementById('ay');
+  const azEl = document.getElementById('az');
+  const sxEl = document.getElementById('sx');
+  const syEl = document.getElementById('sy');
+  const szEl = document.getElementById('sz');
+ 
+  // センサー値
+  let ori = {alpha:0,beta:0,gamma:0};
+  let acc = {x:0,y:0,z:0};
+ 
+  // スムージング用
+  let filt = {x:0,y:0,z:0};
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+ 
+  // WebSocket
+  let ws = null;
+  function setConn(status, cls='') {
+    connEl.textContent = status;
+    connEl.className = 'mono ' + cls;
+  }
+ 
+  // 権限リクエスト（iOS）
+  btnPerm.onclick = async () => {
+    try {
+      let ok1 = true, ok2 = true;
+      if (typeof DeviceMotionEvent !== 'undefined' &&
+          typeof DeviceMotionEvent.requestPermission === 'function') {
+        ok1 = (await DeviceMotionEvent
  
