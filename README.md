@@ -1,5 +1,5 @@
-# himo-robot
-himo-robot/
+# rope-robot
+rope-robot/
 
 ├─ input/        ← スマホ入力関連（UI）
 
