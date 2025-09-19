@@ -19,4 +19,4 @@ rope-robot/
 
 └─ README.md     ← 全体の説明とツリー図
  
-[Robot Notes : 実験ノート](https://utakik.github.io/robot-notes/)
+[Robot Notes : 携帯入力 3 ropes ](https://utakik.github.io/robot-notes/)
