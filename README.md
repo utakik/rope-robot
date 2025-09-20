@@ -1,5 +1,5 @@
 # rope-robot
-ロープロボット開発記 / Rope robot development log  
+ひもロボット開発記 / Rope robot development log  
 
 スマホの傾きセンサー値を WebSocket 経由で PC と ESP32 に送り、  
 ログ保存やサーボ／SMA 制御につなげる実験プロジェクトです。  
