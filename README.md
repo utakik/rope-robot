@@ -1,21 +1,36 @@
-# ひもロボット実験プロジェクト
+# rope-robot
+ロープロボット開発記 / Rope robot development log  
 
-## 概要
-スマホの傾きセンサー値を WebSocket 経由で PC と ESP32 に送信し、
-ログ保存やサーボ／SMA の制御につなげる実験プロジェクトです。
+スマホの傾きセンサー値を WebSocket 経由で PC と ESP32 に送り、  
+ログ保存やサーボ／SMA 制御につなげる実験プロジェクトです。  
 
-- スマホ → PC → CSV ログ保存 ✅
-- スマホ → ESP32 → 受信成功 ✅
-- 次のステップ: サーボ制御, SMA駆動, ログ可視化
+---
+
+## プロジェクト一覧
+- **swing_robot**  
+  ブランコロボット実験と記録 / Swing robot experiments  
+
+- **triple_rope_robot**  
+  3連ひもロボット実験と記録 / Triple rope robot experiments  
+
+- **common**  
+  共通コード・手順（PCロガー、ESP32基本スケッチなど）  
+
+---
+
+## 現状
+- ✅ スマホ → PC → CSV ログ保存成功  
+- ✅ ESP32でWebSocket受信成功  
+- ⏳ ESP32 → サーボ制御の最小ループを実装中  
+- 📝 SMA駆動とログ可視化は今後の課題  
+
+---
+
+## 進捗ログ
+- **2025-09-20**: README更新、ブランコロボット・3連ひもロボットの項目を追加  
+- **2025-09-15**: ESP32でWebSocket受信に成功  
+- **2025-09-10**: スマホ → PC ログ保存が安定動作  
+
+---
 
 ## ディレクトリ構成
-- `docs/` : 実験ログや説明
-- `server/` : PC側のWebSocketロガーと送信用ページ
-- `esp32/` : ESP32用スケッチ
-- `logs/` : 実験で生成されるCSVファイル（git管理対象外）
-
-## 進め方
-1. PCで `server.js` を起動
-2. PCで `http-server` を起動し、スマホから `index_sensor.html` にアクセス
-3. ESP32をWi-Fiに接続し、宛先Bを `ws://<ESP32_IP>:81` に設定
-4. サーボやSMAを接続して制御テスト
