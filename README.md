@@ -1,22 +1,21 @@
-# rope-robot
-rope-robot/
+# ひもロボット実験プロジェクト
 
-├─ input/        ← スマホ入力関連（UI）
+## 概要
+スマホの傾きセンサー値を WebSocket 経由で PC と ESP32 に送信し、
+ログ保存やサーボ／SMA の制御につなげる実験プロジェクトです。
 
-│   ├─ index.html
+- スマホ → PC → CSV ログ保存 ✅
+- スマホ → ESP32 → 受信成功 ✅
+- 次のステップ: サーボ制御, SMA駆動, ログ可視化
 
-│   ├─ tilt.html
+## ディレクトリ構成
+- `docs/` : 実験ログや説明
+- `server/` : PC側のWebSocketロガーと送信用ページ
+- `esp32/` : ESP32用スケッチ
+- `logs/` : 実験で生成されるCSVファイル（git管理対象外）
 
-│   └─ led.html
-
-│
-
-├─ rope-bot/     ← ロボット制御関連（データやアルゴリズム）
-
-│   └─ readme.md
-
-│
-
-└─ README.md     ← 全体の説明とツリー図
- 
-[Robot Notes : 携帯入力 3 ropes ](https://utakik.github.io/robot-notes/)
+## 進め方
+1. PCで `server.js` を起動
+2. PCで `http-server` を起動し、スマホから `index_sensor.html` にアクセス
+3. ESP32をWi-Fiに接続し、宛先Bを `ws://<ESP32_IP>:81` に設定
+4. サーボやSMAを接続して制御テスト
