@@ -18,6 +18,6 @@
 
 ## 関連データ
 - [Tinkercadモデル](models/swing_v1.stl)  
-- ![サムネイル](media/swing_thumb.png)
+- ![サムネイル](media/IMG_20250916_212931.jpg)
 
 (media/IMG_20250916_212931.jpg)
