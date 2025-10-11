@@ -1,39 +1,29 @@
-// --- Fixed anchor + soft chain (tilt) ---
-// 根元は固定。上から2節目をswayで横に駆動。
-// 改良点: ①縦ターゲット相対化 ②横伝播2パス ③傾きスムージング ④長さ拘束（距離補正）
+// === Tilt-driven hanging ropes (full Verlet) ===
+// ・各節は pos / prev を持ち、Verlet積分で慣性＋重力
+// ・距離拘束を複数回解いて突っ張りを解消
+// ・駆動はアンカー(節0)の位置を左右に動かすのみ
+// ・3本ロープ
 
-const NUM_ROPES = 3;
-const SEG = 12;
-const REST = 28;
-const ANCHOR_Y = 140;
-const SPACING = 90;
+const NUM_ROPES   = 3;
+const SEGMENTS    = 12;
+const REST_LEN    = 28;    // 節間距離
+const GRAVITY     = 0.35;  // 重力
+const DAMPING     = 0.997; // 速度減衰(Verletのpos-prevに掛ける)
+const SOLVE_ITERS = 10;    // 拘束反復回数（重要）
+const ANCHOR_Y    = 140;
+const SPACING     = 90;
+const SWAY_AMPL   = 220;
 
-const SWAY_AMPL = 220; // 駆動点(2節目)の左右可動幅
-const KX_TOP = 0.45;   // 2節目の横追従（根元に近いので強め）
-const KX = 0.34;       // それ以降の横追従
-const KY = 0.12;       // 縦のばね
-const DAMP = 0.90;     // 縦速度の減衰
-
-let tiltX = 0, swayLP = 0; // ③スムージング用
-let ropes = []; // {x,y,vy}
-let canvasRef;
+let tiltX = 0, swayLP = 0;
+let ropes = [];  // ropes[r][i] = {pos:{x,y}, prev:{x,y}}
+let anchors = []; // createVector
 
 function setup(){
-  canvasRef = createCanvas(windowWidth, windowHeight);
-
-  // キャンバス固定＆スクロール抑止
-  canvasRef.position(0, 0);
-  canvasRef.style('position', 'fixed');
-  canvasRef.style('inset', '0');
-  canvasRef.style('touch-action', 'none');
-  document.body.style.margin = '0';
-  document.body.style.overscrollBehavior = 'none';
-  window.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
-
   pixelDensity(1);
+  createCanvas(windowWidth, windowHeight);
   initRopes();
 
-  // iOSの許可
+  // iOSの許可UI
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       DeviceOrientationEvent.requestPermission) {
     const btn = createButton('Enable Tilt');
@@ -44,87 +34,113 @@ function setup(){
     });
   }
   window.addEventListener('deviceorientation', e => { tiltX = e.gamma ?? 0; });
+
+  // 画面固定
+  document.body.style.margin = '0';
+  document.body.style.overscrollBehavior = 'none';
+  window.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
 }
 
 function initRopes(){
+  anchors = [];
   ropes = [];
   const cx = width/2;
   for (let r=0; r<NUM_ROPES; r++){
-    const arr = [];
-    const ax = cx + (r-1)*SPACING;
-    for (let i=0; i<SEG; i++){
-      arr.push({ x: ax, y: ANCHOR_Y + i*REST, vy: 0 });
+    anchors.push(createVector(cx + (r-1)*SPACING, ANCHOR_Y));
+    const chain = [];
+    for (let i=0; i<SEGMENTS; i++){
+      const x = anchors[r].x;
+      const y = ANCHOR_Y + i*REST_LEN;
+      chain.push({ pos:{x, y}, prev:{x, y} });
     }
-    ropes.push(arr);
+    ropes.push(chain);
   }
 }
 
 function draw(){
   background(245);
 
-  // ③ティルトのスムージング（-1..1）
+  // 傾き（-1..1）をスムージング
   const sway = constrain(tiltX/45, -1, 1);
   swayLP = lerp(swayLP, sway, 0.15);
 
+  // アンカーを左右に（根元のみ動かす）
   for (let r=0; r<NUM_ROPES; r++){
-    const rope = ropes[r];
-    const anchorX = width/2 + (r-1)*SPACING; // ルートは固定
-    rope[0].x = anchorX;
-    rope[0].y = ANCHOR_Y;
+    anchors[r].x = width/2 + (r-1)*SPACING + swayLP*SWAY_AMPL;
+    anchors[r].y = ANCHOR_Y;
+  }
 
-    // 駆動点 = 2節目(インデックス1) を左右に引く
-    const driveX = anchorX + swayLP * SWAY_AMPL;
-    rope[1].x += (driveX - rope[1].x) * KX_TOP;
+  // ==== 物理更新（Verlet）====
+  for (let r=0; r<NUM_ROPES; r++){
+    const chain = ropes[r];
 
-    // ①縦ターゲットは「ひとつ上 + REST」の相対目標
-    const targetY1 = rope[0].y + REST;
-    rope[1].vy = (rope[1].vy + (targetY1 - rope[1].y) * KY) * DAMP;
-    rope[1].y  += rope[1].vy;
+    // 1) 節の自由落下（節0は後で固定するので飛ばす）
+    for (let i=1; i<SEGMENTS; i++){
+      const p  = chain[i].pos;
+      const pp = chain[i].prev;
 
-    // ②横伝播を2パス（前→後 を2回）で角を減らす
-    for (let pass=0; pass<2; pass++){
-      for (let i=2; i<SEG; i++){
-        rope[i].x += (rope[i-1].x - rope[i].x) * KX;
-      }
+      // 現在速度 = pos - prev
+      let vx = (p.x - pp.x) * DAMPING;
+      let vy = (p.y - pp.y) * DAMPING + GRAVITY;
+
+      // Verlet update
+      chain[i].prev = { x: p.x, y: p.y };
+      chain[i].pos  = { x: p.x + vx, y: p.y + vy };
     }
 
-    // 3節目以降：縦ばね（相対）
-    for (let i=2; i<SEG; i++){
-      const targetY = rope[i-1].y + REST;   // ①相対に変更
-      rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY) * DAMP;
-      rope[i].y  += rope[i].vy;
-    }
+    // 2) 拘束を複数回解く（節間距離=REST_LEN）
+    for (let k=0; k<SOLVE_ITERS; k++){
+      // a=節i, b=節i+1をREST_LENに
+      for (let i=0; i<SEGMENTS-1; i++){
+        const a = chain[i].pos;
+        const b = chain[i+1].pos;
 
-    // ④ 長さ拘束（1ステップだけ）
-    for (let i=1; i<SEG; i++){
-      const a = rope[i-1], b = rope[i];
-      let dx = b.x - a.x, dy = b.y - a.y;
-      let d = Math.hypot(dx, dy) || 1;
-      let diff = (d - REST) / d;
-      // 根元(0)は固定、2節目(1)は横を駆動中なのでaは動かさない
-      b.x -= dx * 0.5 * diff;
-      b.y -= dy * 0.5 * diff;
-      if (i > 1) {
-        a.x += dx * 0.5 * diff;
-        a.y += dy * 0.5 * diff;
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let dist = Math.hypot(dx, dy) || 1e-6;
+        const diff = (dist - REST_LEN) / dist;
+
+        // 根元(節0)はアンカー固定なので動かさない
+        if (i === 0){
+          // a固定 → bだけ戻す
+          b.x -= dx * diff;
+          b.y -= dy * diff;
+        } else {
+          // aとbを半分ずつ寄せる
+          const corrX = dx * 0.5 * diff;
+          const corrY = dy * 0.5 * diff;
+          a.x += corrX; a.y += corrY;
+          b.x -= corrX; b.y -= corrY;
+        }
       }
+
+      // 3) アンカーに再ピン留め（毎反復）
+      chain[0].pos.x = anchors[r].x;
+      chain[0].pos.y = anchors[r].y;
+      chain[0].prev.x = anchors[r].x; // 根元の速度をゼロに
+      chain[0].prev.y = anchors[r].y;
     }
   }
 
-  // 描画
+  // ==== 描画 ====
   const cols = [color(0,0,0,220), color(70,140,255,220), color(240,70,70,220)];
   strokeWeight(4); noFill();
   for (let r=0; r<NUM_ROPES; r++){
     stroke(cols[r]);
     beginShape();
-    for (let i=0; i<SEG; i++) vertex(ropes[r][i].x, ropes[r][i].y);
+    for (let i=0; i<SEGMENTS; i++){
+      vertex(ropes[r][i].pos.x, ropes[r][i].pos.y);
+    }
     endShape();
-    const tip = ropes[r][SEG-1];
+
+    // 先端の重り
+    const tip = ropes[r][SEGMENTS-1].pos;
     fill(cols[r]); noStroke(); circle(tip.x, tip.y, 16); noFill();
   }
 
+  // UI
   noStroke(); fill(0);
-  text(`tilt:${nf(tiltX,1,2)}  (root fixed)`, 12, height-14);
+  text(`tilt:${nf(tiltX,1,2)}  solve:${SOLVE_ITERS}  g:${GRAVITY}`, 12, height-14);
 }
 
 function windowResized(){ resizeCanvas(windowWidth, windowHeight); initRopes(); }
