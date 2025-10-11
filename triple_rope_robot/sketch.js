@@ -1,146 +1,92 @@
-// === Tilt-driven hanging ropes (full Verlet) ===
-// ・各節は pos / prev を持ち、Verlet積分で慣性＋重力
-// ・距離拘束を複数回解いて突っ張りを解消
-// ・駆動はアンカー(節0)の位置を左右に動かすのみ
-// ・3本ロープ
+// --- 1-joint rope test (tilt) ---
+// 各ロープは「根元(固定) + 先端(可動)」の2点だけ。
+// xは傾きで目標に追従、yはばね＋減衰で安定させる。
 
-const NUM_ROPES   = 3;
-const SEGMENTS    = 12;
-const REST_LEN    = 28;    // 節間距離
-const GRAVITY     = 0.35;  // 重力
-const DAMPING     = 0.997; // 速度減衰(Verletのpos-prevに掛ける)
-const SOLVE_ITERS = 10;    // 拘束反復回数（重要）
-const ANCHOR_Y    = 140;
-const SPACING     = 90;
-const SWAY_AMPL   = 220;
+const NUM_ROPES = 3;
+const SEG = 2;           // ← 関節数1（節は2点：0=根元,1=先端）
+const REST = 60;         // 根元-先端の自然長（見やすく少し長めに）
+const ANCHOR_Y = 160;
+const SPACING = 90;
+
+const SWAY_AMPL = 180;   // 傾き→左右の最大振れ
+const KX_ONE = 0.28;     // 先端の横追従（大きい=速いが硬い）
+const KY_ONE = 0.12;     // 縦のばね（大きい=戻りが強い）
+const DAMP = 0.93;       // 縦速度の減衰（大きい=ゆっくり止まる）
+const SWAY_LP = 0.18;    // 傾きスムージング
 
 let tiltX = 0, swayLP = 0;
-let ropes = [];  // ropes[r][i] = {pos:{x,y}, prev:{x,y}}
-let anchors = []; // createVector
+let ropes = []; // ropes[r] = [{x,y,vy},{x,y,vy}]
+let cnv;
 
 function setup(){
+  cnv = createCanvas(windowWidth, windowHeight);
+  cnv.position(0,0); cnv.style('position','fixed'); cnv.style('inset','0'); cnv.style('touch-action','none');
+  document.body.style.margin='0'; document.body.style.overscrollBehavior='none';
+  window.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
   pixelDensity(1);
-  createCanvas(windowWidth, windowHeight);
+
   initRopes();
 
-  // iOSの許可UI
+  // iOSの傾き許可
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       DeviceOrientationEvent.requestPermission) {
     const btn = createButton('Enable Tilt');
     btn.position(12,12);
-    btn.mousePressed(async()=>{
-      try{ await DeviceOrientationEvent.requestPermission(); }catch(e){}
-      btn.remove();
-    });
+    btn.mousePressed(async()=>{ try{await DeviceOrientationEvent.requestPermission();}catch(e){} btn.remove(); });
   }
   window.addEventListener('deviceorientation', e => { tiltX = e.gamma ?? 0; });
-
-  // 画面固定
-  document.body.style.margin = '0';
-  document.body.style.overscrollBehavior = 'none';
-  window.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
 }
 
 function initRopes(){
-  anchors = [];
   ropes = [];
   const cx = width/2;
   for (let r=0; r<NUM_ROPES; r++){
-    anchors.push(createVector(cx + (r-1)*SPACING, ANCHOR_Y));
-    const chain = [];
-    for (let i=0; i<SEGMENTS; i++){
-      const x = anchors[r].x;
-      const y = ANCHOR_Y + i*REST_LEN;
-      chain.push({ pos:{x, y}, prev:{x, y} });
-    }
-    ropes.push(chain);
+    const ax = cx + (r-1)*SPACING;
+    const root = { x: ax, y: ANCHOR_Y, vy: 0 };            // 根元（描画には使うが固定）
+    const tip  = { x: ax, y: ANCHOR_Y + REST, vy: 0 };     // 先端（可動）
+    ropes.push([root, tip]);
   }
 }
 
 function draw(){
   background(245);
 
-  // 傾き（-1..1）をスムージング
+  // 傾き→[-1..1] に正規化してLPF
   const sway = constrain(tiltX/45, -1, 1);
-  swayLP = lerp(swayLP, sway, 0.15);
+  swayLP = lerp(swayLP, sway, SWAY_LP);
 
-  // アンカーを左右に（根元のみ動かす）
   for (let r=0; r<NUM_ROPES; r++){
-    anchors[r].x = width/2 + (r-1)*SPACING + swayLP*SWAY_AMPL;
-    anchors[r].y = ANCHOR_Y;
+    const rope = ropes[r];
+    const root = rope[0];
+    const tip  = rope[1];
+
+    // 根元は固定（中央+間隔）
+    root.x = width/2 + (r-1)*SPACING;
+    root.y = ANCHOR_Y;
+
+    // 先端X：傾きで左右へ目標追従
+    const driveX = root.x + swayLP * SWAY_AMPL;
+    tip.x += (driveX - tip.x) * KX_ONE;
+
+    // 先端Y：根元＋REST に戻るばね＋減衰
+    const targetY = root.y + REST;
+    tip.vy = (tip.vy + (targetY - tip.y) * KY_ONE) * DAMP;
+    tip.y += tip.vy;
   }
 
-  // ==== 物理更新（Verlet）====
-  for (let r=0; r<NUM_ROPES; r++){
-    const chain = ropes[r];
-
-    // 1) 節の自由落下（節0は後で固定するので飛ばす）
-    for (let i=1; i<SEGMENTS; i++){
-      const p  = chain[i].pos;
-      const pp = chain[i].prev;
-
-      // 現在速度 = pos - prev
-      let vx = (p.x - pp.x) * DAMPING;
-      let vy = (p.y - pp.y) * DAMPING + GRAVITY;
-
-      // Verlet update
-      chain[i].prev = { x: p.x, y: p.y };
-      chain[i].pos  = { x: p.x + vx, y: p.y + vy };
-    }
-
-    // 2) 拘束を複数回解く（節間距離=REST_LEN）
-    for (let k=0; k<SOLVE_ITERS; k++){
-      // a=節i, b=節i+1をREST_LENに
-      for (let i=0; i<SEGMENTS-1; i++){
-        const a = chain[i].pos;
-        const b = chain[i+1].pos;
-
-        let dx = b.x - a.x;
-        let dy = b.y - a.y;
-        let dist = Math.hypot(dx, dy) || 1e-6;
-        const diff = (dist - REST_LEN) / dist;
-
-        // 根元(節0)はアンカー固定なので動かさない
-        if (i === 0){
-          // a固定 → bだけ戻す
-          b.x -= dx * diff;
-          b.y -= dy * diff;
-        } else {
-          // aとbを半分ずつ寄せる
-          const corrX = dx * 0.5 * diff;
-          const corrY = dy * 0.5 * diff;
-          a.x += corrX; a.y += corrY;
-          b.x -= corrX; b.y -= corrY;
-        }
-      }
-
-      // 3) アンカーに再ピン留め（毎反復）
-      chain[0].pos.x = anchors[r].x;
-      chain[0].pos.y = anchors[r].y;
-      chain[0].prev.x = anchors[r].x; // 根元の速度をゼロに
-      chain[0].prev.y = anchors[r].y;
-    }
-  }
-
-  // ==== 描画 ====
+  // 描画
   const cols = [color(0,0,0,220), color(70,140,255,220), color(240,70,70,220)];
   strokeWeight(4); noFill();
   for (let r=0; r<NUM_ROPES; r++){
     stroke(cols[r]);
-    beginShape();
-    for (let i=0; i<SEGMENTS; i++){
-      vertex(ropes[r][i].pos.x, ropes[r][i].pos.y);
-    }
-    endShape();
-
-    // 先端の重り
-    const tip = ropes[r][SEGMENTS-1].pos;
-    fill(cols[r]); noStroke(); circle(tip.x, tip.y, 16); noFill();
+    const root = ropes[r][0], tip = ropes[r][1];
+    line(root.x, root.y, tip.x, tip.y);
+    fill(cols[r]); noStroke(); circle(tip.x, tip.y, 18); noFill();
   }
 
-  // UI
+  // デバッグ（目標位置のガイド）
   noStroke(); fill(0);
-  text(`tilt:${nf(tiltX,1,2)}  solve:${SOLVE_ITERS}  g:${GRAVITY}`, 12, height-14);
+  text(`tilt:${nf(tiltX,1,2)}  SWAY_LP:${SWAY_LP}`, 12, height-16);
 }
 
 function windowResized(){ resizeCanvas(windowWidth, windowHeight); initRopes(); }
