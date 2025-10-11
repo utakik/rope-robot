@@ -1,28 +1,31 @@
-// --- 2-joint ropes (tilt) - stiff-fix ---
-// 対策:
-//  A) 根元-中間 / 中間-先端 の長さ拘束を複数回 (ITER=3〜5)
-//  B) driveX の1フレーム移動量を制限 (MAX_STEP)
-//  C) 中間節の曲がりを軽く平滑化 (BEND = 0.08)
+// --- 2-joint ropes (tilt) — monotonic bend ---
+// 目的: 下に行くほど角度が大きい（同方向で tip > mid）
+// 手法: 目標Xに深さ係数を導入 (MID_GAIN < TIP_GAIN) + ばね + 長さ拘束
 
 const NUM_ROPES = 3;
-const SEG = 3;               // 0=root(固定),1=mid,2=tip
-const REST = 60;             // 節間自然長
+const SEG = 3;               // 0=root,1=mid,2=tip
+const REST = 60;
 const ANCHOR_Y = 160;
 const SPACING = 90;
 
-const SWAY_AMPL = 160;       // ←少し控えめに（急激な目標で伸びが出やすい）
-const MAX_STEP = 18;         // ←1フレームで mid.x が動ける最大px（抑制）
-const KX1 = 0.16;            // mid 横追従（強すぎると角が出やすい）
-const KX2 = 0.18;            // tip 横追従（midに遅れて追従）
-const KY  = 0.12;            // 縦ばね
-const DAMP= 0.93;            // 縦減衰
+const SWAY_AMPL = 160;       // 基準振れ幅（root基準）
+const MID_GAIN  = 0.85;      // 中節の深さ係数（<1）
+const TIP_GAIN  = 1.20;      // 先端の深さ係数（>1）←ここで tip > mid を保証
+
+const KX_MID = 0.20;         // mid の横追従
+const KX_TIP = 0.24;         // tip の横追従（やや速く）
+const MAX_STEP_MID = 14;     // mid 1フレーム最大移動
+const MAX_STEP_TIP = 18;     // tip 1フレーム最大移動
+
+const KY_MID = 0.12, DAMP_MID = 0.93; // 縦ばね/減衰（mid）
+const KY_TIP = 0.14, DAMP_TIP = 0.92; // 縦ばね/減衰（tip）←軽めに
+
+const ITER = 4;              // 長さ拘束の反復回数
+const TIP_BIAS = 0.7;        // 拘束配分：tip側を多めに動かす
 const SWAY_LP = 0.18;        // 傾きLPF
 
-const ITER = 5;              // ← 長さ拘束の反復回数（まずは4、重ければ3）
-const BEND = 0.08;           // ← 中間節の曲がり平滑化（0〜0.15くらい）
-
 let tiltX = 0, swayLP = 0;
-let ropes = []; // [ [root, mid, tip], ... ], 各点 {x,y,vy}
+let ropes = []; // [ [root, mid, tip], ... ] 各点 {x,y,vy}
 let cnv;
 
 function setup(){
@@ -34,7 +37,7 @@ function setup(){
 
   initRopes();
 
-  // iOSの傾き許可
+  // iOS 傾き許可
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       DeviceOrientationEvent.requestPermission) {
     const btn = createButton('Enable Tilt');
@@ -49,10 +52,11 @@ function initRopes(){
   const cx = width/2;
   for (let r=0; r<NUM_ROPES; r++){
     const ax = cx + (r-1)*SPACING;
-    const root = { x: ax, y: ANCHOR_Y,        vy: 0 };
-    const mid  = { x: ax, y: ANCHOR_Y+REST,   vy: 0 };
-    const tip  = { x: ax, y: ANCHOR_Y+REST*2, vy: 0 };
-    ropes.push([root, mid, tip]);
+    ropes.push([
+      { x: ax, y: ANCHOR_Y,          vy: 0 },         // root
+      { x: ax, y: ANCHOR_Y + REST,   vy: 0 },         // mid
+      { x: ax, y: ANCHOR_Y + REST*2, vy: 0 },         // tip
+    ]);
   }
 }
 
@@ -71,35 +75,26 @@ function draw(){
     root.x = width/2 + (r-1)*SPACING;
     root.y = ANCHOR_Y;
 
-    // 目標位置（横）
-    const targetX = root.x + swayLP * SWAY_AMPL;
+    // --- 目標X（深さ係数で mid < tip を保証）
+    const baseX = root.x + swayLP * SWAY_AMPL;
+    const targetMidX = root.x + (baseX - root.x) * MID_GAIN; // 同方向・小さめ
+    const targetTipX = root.x + (baseX - root.x) * TIP_GAIN; // 同方向・大きめ
 
-    // ---- A. 横：追従（中間→目標、先端→中間）
-    // ただし B. mid.x の1フレーム移動量を制限して急激な伸びを防ぐ
-    let desiredMidX = mid.x + (targetX - mid.x) * KX1;
-    let step = desiredMidX - mid.x;
-    if (Math.abs(step) > MAX_STEP) desiredMidX = mid.x + Math.sign(step) * MAX_STEP;
-    mid.x = desiredMidX;
+    // 横：追従（ステップ上限つき）
+    mid.x = stepToward(mid.x, targetMidX, KX_MID, MAX_STEP_MID);
+    tip.x = stepToward(tip.x, targetTipX, KX_TIP, MAX_STEP_TIP);
 
-    tip.x += (mid.x - tip.x) * KX2;
-
-    // ---- 縦：相対ばね + 減衰（各点が1つ上+RESTへ）
+    // 縦：相対ばね + 減衰
     const targetY1 = root.y + REST;
-    mid.vy = (mid.vy + (targetY1 - mid.y) * KY) * DAMP;
-    mid.y += mid.vy;
+    mid.vy = (mid.vy + (targetY1 - mid.y) * KY_MID) * DAMP_MID;  mid.y += mid.vy;
 
     const targetY2 = mid.y + REST;
-    tip.vy = (tip.vy + (targetY2 - tip.y) * KY) * DAMP;
-    tip.y += tip.vy;
+    tip.vy = (tip.vy + (targetY2 - tip.y) * KY_TIP) * DAMP_TIP;  tip.y += tip.vy;
 
-    // ---- C. 曲がりを軽く平滑化（midをroot&tipの中点へ少し引く）
-    mid.x = lerp(mid.x, (root.x + tip.x) * 0.5, BEND);
-    mid.y = lerp(mid.y, (root.y + tip.y) * 0.5, BEND*0.6); // yは弱め
-
-    // ---- A. 仕上げ：長さ拘束を複数回
+    // 長さ拘束（複数回）— tip側にバイアス
     for (let k=0; k<ITER; k++){
-      lengthConstraint(root, mid, REST, /*lockA=*/true);  // root固定：midだけ動かす
-      lengthConstraint(mid,  tip, REST, /*lockA=*/false); // 両側少しずつ
+      constraintBias(root, mid, REST, /*lockA=*/true,  /*biasToB=*/1.0);      // root固定
+      constraintBias(mid,  tip, REST, /*lockA=*/false, /*biasToB=*/TIP_BIAS); // tip多め
     }
   }
 
@@ -107,28 +102,33 @@ function draw(){
   const cols = [color(0,0,0,220), color(70,140,255,220), color(240,70,70,220)];
   strokeWeight(4); noFill();
   for (let r=0; r<NUM_ROPES; r++){
-    stroke(cols[r]);
-    const a = ropes[r][0], b = ropes[r][1], c = ropes[r][2];
-    beginShape(); vertex(a.x,a.y); vertex(b.x,b.y); vertex(c.x,c.y); endShape();
+    const [a,b,c] = ropes[r];
+    stroke(cols[r]); beginShape(); vertex(a.x,a.y); vertex(b.x,b.y); vertex(c.x,c.y); endShape();
     fill(cols[r]); noStroke(); circle(c.x, c.y, 18); noFill();
   }
 
   noStroke(); fill(0);
-  text(`tilt:${nf(tiltX,1,2)}  iter:${ITER}  stepCap:${MAX_STEP}`, 12, height-16);
+  text(`tilt:${nf(tiltX,1,2)}  gains M:${MID_GAIN} T:${TIP_GAIN}`, 12, height-16);
 }
 
-function lengthConstraint(a, b, rest, lockA){
+function stepToward(current, target, k, maxStep){
+  let next = current + (target - current) * k;
+  let d = next - current;
+  if (Math.abs(d) > maxStep) next = current + Math.sign(d) * maxStep;
+  return next;
+}
+
+function constraintBias(a, b, rest, lockA, biasToB){
+  // biasToB: 0.5で等分、>0.5でb(下側)を多めに動かす
   let dx = b.x - a.x, dy = b.y - a.y;
   let dist = Math.hypot(dx, dy) || 1;
   let diff = (dist - rest) / dist;
-
-  // 誤差が小さければスキップ（揺れた末端での微振動を抑える）
   if (Math.abs(dist - rest) < 0.05) return;
 
-  const corrX = dx * 0.5 * diff;
-  const corrY = dy * 0.5 * diff;
-  if (!lockA){ a.x += corrX; a.y += corrY; }
-  b.x -= corrX;  b.y -= corrY;
+  const wb = biasToB;
+  const wa = lockA ? 0 : (1 - wb);
+  b.x -= dx * wb * diff; b.y -= dy * wb * diff;
+  if (!lockA){ a.x += dx * wa * diff; a.y += dy * wa * diff; }
 }
 
 function windowResized(){ resizeCanvas(windowWidth, windowHeight); initRopes(); }
