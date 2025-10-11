@@ -1,7 +1,6 @@
-// --- 3-joint ropes (tilt) — monotonic enforced ---
-// 下ほど角度が大きい & 方向が揃うのを後処理で強制
+// --- 3-joint ropes (tilt) — monotonic w/ soft center ---
 
-const VERSION = "2025-10-11-06"; // ←いまの番号に合わせる
+const VERSION = "2025-10-11-07";
 
 const NUM_ROPES = 3;
 const SEG = 4;               // 0=root,1=mid,2=lower,3=tip
@@ -10,8 +9,8 @@ const ANCHOR_Y = 160;
 const SPACING = 90;
 
 const SWAY_AMPL = 160;
-const GAIN = [0.65, 0.3, 1.45]; // ←差を大きめにして tip を強く
-const KX   = [0.18, 0.22, 0.26]; // 下ほど速く
+const GAIN = [0.65, 2, 1.45];
+const KX   = [0.18, 0.22, 0.26];
 const KY   = [0.11, 0.13, 0.15];
 const DAMP = [0.93, 0.92, 0.91];
 const MAX_STEP = [12, 14, 18];
@@ -19,7 +18,13 @@ const ITER = 5;
 const SWAY_LP = 0.18;
 const TIP_BIAS = 0.7;
 
+// ★ 中央ガクつき対策パラメータ
+const DIR_DEADZONE = 10;     // px以内では向きを切り替えない（ヒステリシス）
+const MONO_BLEND0  = 12;     // 単調強制の開始距離
+const MONO_BLEND1  = 60;     // ここを超えるとフル強制
+
 let tiltX = 0, swayLP = 0;
+let prevDir = 1;             // ★ 直前の向き（ヒステリシス用）
 let ropes = [];
 let cnv;
 
@@ -74,17 +79,19 @@ function draw(){
     root.y = ANCHOR_Y;
 
     const baseX = root.x + swayLP * SWAY_AMPL;
+    const delta = baseX - root.x;
 
-    // --- 横：目標 → 追従（節ごとに深さ係数）
+    // --- 横：目標 → 追従
     for (let i=1; i<SEG; i++){
-      const targetX = root.x + (baseX - root.x) * GAIN[i-1];
+      const targetX = root.x + delta * GAIN[i-1];
       rope[i].x = stepToward(rope[i].x, targetX, KX[i-1], MAX_STEP[i-1]);
     }
 
-    // ★ 単調性を強制（方向を揃える）
-    // dir>0: 右へ行くほどxが増える / dir<0: 減る
-    const dir = Math.sign(baseX - root.x) || 1;
-    enforceMonotonicX(rope, dir, 0.0001);
+    // ★ 単調性の“重み付き”強制（中心は弱く、離れると強く）
+    const dir = Math.abs(delta) > DIR_DEADZONE ? Math.sign(delta) : prevDir; // ヒステリシス
+    prevDir = dir;
+    const w = smoothstep(MONO_BLEND0, MONO_BLEND1, Math.abs(delta)); // 0..1
+    enforceMonotonicXWeighted(rope, dir, w);
 
     // --- 縦：相対ばね + 減衰
     for (let i=1; i<SEG; i++){
@@ -93,7 +100,7 @@ function draw(){
       rope[i].y  += rope[i].vy;
     }
 
-    // --- 長さ拘束（下ほど優先）
+    // --- 長さ拘束
     for (let k=0; k<ITER; k++){
       for (let i=1; i<SEG; i++){
         constraintBias(rope[i-1], rope[i], REST, (i===1), TIP_BIAS);
@@ -127,12 +134,16 @@ function stepToward(current, target, k, maxStep){
   return next;
 }
 
-// 方向(dir)に沿って x を単調に並べ替える（下ほど角度が深く見える）
-function enforceMonotonicX(rope, dir, eps=0){
+// ★ 重み付きで“単調なx”へ寄せる（w=0で無効, w=1で完全）
+function enforceMonotonicXWeighted(rope, dir, w){
+  if (w <= 0) return;
+  const eps = 0; // 必要なら 0.1 など
   for (let i=1; i<rope.length; i++){
     const prev = rope[i-1].x;
-    if (dir > 0 && rope[i].x < prev + eps) rope[i].x = prev + eps;
-    if (dir < 0 && rope[i].x > prev - eps) rope[i].x = prev - eps;
+    let clampX = rope[i].x;
+    if (dir > 0 && clampX < prev + eps) clampX = prev + eps;
+    if (dir < 0 && clampX > prev - eps) clampX = prev - eps;
+    rope[i].x = lerp(rope[i].x, clampX, w); // ← いきなりスナップさせない
   }
 }
 
@@ -146,6 +157,12 @@ function constraintBias(a, b, rest, lockA, biasToB){
   const wa = lockA ? 0 : (1 - wb);
   b.x -= dx * wb * diff; b.y -= dy * wb * diff;
   if (!lockA){ a.x += dx * wa * diff; a.y += dy * wa * diff; }
+}
+
+// 0..1 のスムースステップ
+function smoothstep(a, b, x){
+  const t = constrain((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
 }
 
 function windowResized(){ resizeCanvas(windowWidth, windowHeight); initRopes(); }
