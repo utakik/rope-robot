@@ -2,15 +2,25 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <!-- ズーム&パン抑止を強める -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Triple Rope Robot</title>
+
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      overscroll-behavior: none;       /* iOSのゴムスクロールを止める */
+    }
+    body { overflow: hidden; }          /* ページのスクロール無効 */
+    canvas {
+      position: fixed; inset: 0;
+      touch-action: none;               /* ジェスチャー無効（パン/ズーム抑止） */
+    }
+  </style>
+
   <script src="https://unpkg.com/p5@1.9.4/lib/p5.min.js"></script>
   <script src="./sketch.js"></script>
-  <style>
-    html, body { margin:0; padding:0; overflow:hidden; background:#fafafa; }
-    canvas { display:block; touch-action:none; }
-  </style>
 </head>
-<body>
-</body>
+<body></body>
 </html>
