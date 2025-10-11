@@ -1,6 +1,6 @@
 // --- Fixed anchor + soft chain (tilt) ---
 // 根元は固定。上から2節目をswayで横に駆動。
-// 改良点: ①縦ターゲットを相対化 ②横伝播2パス ③傾きスムージング
+// 改良点: ①縦ターゲット相対化 ②横伝播2パス ③傾きスムージング ④長さ拘束（距離補正）
 
 const NUM_ROPES = 3;
 const SEG = 12;
@@ -14,7 +14,7 @@ const KX = 0.34;       // それ以降の横追従
 const KY = 0.12;       // 縦のばね
 const DAMP = 0.90;     // 縦速度の減衰
 
-let tiltX = 0, swayLP = 0; // ← ③スムージング用
+let tiltX = 0, swayLP = 0; // ③スムージング用
 let ropes = []; // {x,y,vy}
 let canvasRef;
 
@@ -93,6 +93,21 @@ function draw(){
       const targetY = rope[i-1].y + REST;   // ①相対に変更
       rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY) * DAMP;
       rope[i].y  += rope[i].vy;
+    }
+
+    // ④ 長さ拘束（1ステップだけ）
+    for (let i=1; i<SEG; i++){
+      const a = rope[i-1], b = rope[i];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let d = Math.hypot(dx, dy) || 1;
+      let diff = (d - REST) / d;
+      // 根元(0)は固定、2節目(1)は横を駆動中なのでaは動かさない
+      b.x -= dx * 0.5 * diff;
+      b.y -= dy * 0.5 * diff;
+      if (i > 1) {
+        a.x += dx * 0.5 * diff;
+        a.y += dy * 0.5 * diff;
+      }
     }
   }
 
