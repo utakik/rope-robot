@@ -1,34 +1,67 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>himo-robot</title>
-<style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px;line-height:1.6}
-  nav a{margin-right:8px}
-  .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0}
-  h1{font-size:1.6rem;margin:0 0 12px}
-  ul{margin:.2rem 0 .8rem 1.2rem}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>rope-robot : ひもロボット開発記</title>
+  <style>
+    :root{--bg:#0b0b0c;--fg:#f5f7fa;--muted:#9aa3af;--card:#141519;--border:#23242a;--link:#9ae6ff}
+    @media (prefers-color-scheme: light){
+      :root{--bg:#fff;--fg:#0f172a;--muted:#64748b;--card:#f8fafc;--border:#e5e7eb;--link:#0284c7}
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--fg);
+         font:16px/1.6 -apple-system,system-ui,Segoe UI,Roboto,"Noto Sans JP",sans-serif}
+    header{position:sticky;top:0;backdrop-filter:saturate(1.2) blur(8px);
+           border-bottom:1px solid var(--border);background:color-mix(in oklab,var(--bg) 86%,transparent)}
+    .row{max-width:960px;margin:0 auto;padding:12px 16px;display:flex;gap:12px;align-items:center}
+    .brand{font-weight:700}
+    nav a{display:inline-block;margin-right:10px;padding:8px 12px;border:1px solid var(--border);
+          border-radius:999px;text-decoration:none;color:var(--fg);background:var(--card)}
+    nav a:hover{border-color:var(--link)}
+    .container{max-width:960px;margin:0 auto;padding:18px 16px 60px}
+    h1{margin:.2em 0 .2em} h2{color:var(--muted);margin:1.2em 0 .4em}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:8px}
+    .card{border:1px solid var(--border);background:var(--card);border-radius:12px;padding:14px;text-decoration:none;color:var(--fg)}
+    .card .k{display:block;color:var(--muted);font-size:13px;margin-top:6px}
+    a{color:var(--link)}
+    .footer{color:var(--muted);font-size:13px;margin-top:24px}
+  </style>
 </head>
 <body>
-<nav>
-  <a href="index.html"><b>Home</b></a> |
-  <a href="tilt.html">Tilt Control</a> |
-  <a href="led.html">LED Test</a> |
-https://utakik.github.io/robot-notes-/" target="_blank" rel="noopener">Robot Notes</a>：実験ノート</li>
-  </ul>
-</div>
- 
-<div class="card">
-  <h2>接続方法（共通）</h2>
-  <ul>
-    <li>WebSocket（低遅延推奨）：例 <code>ws://ESP32のIP:81</code></li>
+<header>
+  <div class="row">
+    <div class="brand">rope-robot</div>
+    <nav>
+      <a href="./">Home</a>
+      <a href="./swing_robot/">Swing robot</a>
+      <a href="./triple_rope_robot/">Triple rope</a>
+      <a href="./common/">Common</a>
+      <a href="https://github.com/utakik/rope-robot">GitHub</a>
+    </nav>
+  </div>
+</header>
 
-HTTP（簡易）：例 http://ESP32のIP</code></li>
-  </ul>
+<div class="container">
+  <h1>ひもロボット開発記</h1>
+  <p>スマホの傾き/カメラ入力を WebSocket 経由で PC・ESP32 に送り、CSVログ保存やサーボ／SMA 制御へ接続する実験群。</p>
+
+  <h2>Projects</h2>
+  <div class="cards">
+    <a class="card" href="./swing_robot/"><b>Swing robot</b><span class="k">ブランコロボット実験</span></a>
+    <a class="card" href="./triple_rope_robot/"><b>Triple rope</b><span class="k">3連ひもロボット実験</span></a>
+    <a class="card" href="./common/"><b>Common</b><span class="k">共通コード・手順（ロガー/ESP32）</span></a>
+  </div>
+
+  <h2>Status</h2>
+  <ul>
+    <li>✅ スマホ → PC → CSV 保存</li>
+    <li>✅ ESP32 WebSocket 受信</li>
+    <li>⏳ サーボ制御ループ実装中</li>
+    <li>📝 SMA・可視化は今後</li>
+  </ul>
+
+  <div class="footer">© utakik — rope-robot</div>
 </div>
- 
 </body>
 </html>
