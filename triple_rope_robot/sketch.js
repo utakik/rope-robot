@@ -15,7 +15,7 @@ const KY   = [0.11, 0.13, 0.15];
 const DAMP = [0.93, 0.92, 0.91];
 const MAX_STEP = [12, 14, 18];
 const ITER = 5;
-const SWAY_LP = 0.18;
+const SWAY_LP = 0.1;
 const TIP_BIAS = 0.7;
 
 // ★ 中央ガクつき対策パラメータ
