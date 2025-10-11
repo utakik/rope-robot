@@ -1,119 +1,126 @@
-// iPad用：傾き許可 + 3本ロープ + 各ロープに関節2つ
+// === Tilt-driven hanging ropes with gravity (Verlet) ===
 
-let tilt = 0, smoothTilt = 0;
-const NUM_ROPES = 3;
-const SEG_LEN = 28;
-const NUM_SEG = 14;          // 節を少し増やす
-const HINGES = [4, 9];       // ← 関節の節番号（上から数える0始まり）
+const NUM_ROPES = 3;         // 3本
+const SEGMENTS = 12;         // 節の数
+const REST_LEN = 28;         // 節間の自然長(px)
+const GRAVITY = 0.35;        // 重力加速度
+const DAMPING = 0.996;       // 速度減衰(1に近いほど慣性大)
+const SOLVE_ITERS = 5;       // 拘束(距離)の反復回数
+const ANCHOR_Y = 140;        // 吊点の高さ
+const ANCHOR_SPACING = 90;   // 吊点の左右間隔
+const SWAY_AMPL = 220;       // 傾きによる左右振れ最大
 
-const ropes = [];
-let enableBtn;
+let tiltX = 0;               // デバイスの左右傾き(度)
+let ropes = [];              // 各ロープ: [{pos, prev}, ...]
+let anchors = [];            // 各ロープのアンカー位置
 
 function setup(){
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
-  textSize(14);
+  initRopes();
 
-  const colors = [[0,0,0],[70,140,255],[230,60,60]];
-  const gap = min(width, 900) / 6;
-
-  for(let r=0; r<NUM_ROPES; r++){
-    const x0 = width/2 + (r-1)*gap;
-    const y0 = height/2 - 160;
-    const segs = [];
-    for(let i=0;i<NUM_SEG;i++) segs.push(createVector(x0, y0 + i*SEG_LEN));
-    ropes.push({ segs, col: colors[r], baseX: x0, baseY: y0 });
+  // iOSは許可ダイアログ
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      DeviceOrientationEvent.requestPermission) {
+    let btn = createButton('Enable Tilt');
+    btn.position(12, 12);
+    btn.mousePressed(async ()=>{
+      try { await DeviceOrientationEvent.requestPermission(); } catch(e){}
+      btn.remove();
+    });
   }
-
-  enableBtn = createButton('Enable Motion');
-  enableBtn.position(16,16);
-  enableBtn.mousePressed(requestMotionPermission);
-
-  document.body.style.margin='0';
-  document.body.style.overscrollBehavior='none';
+  window.addEventListener('deviceorientation', e => { tiltX = e.gamma || 0; });
 }
 
-async function requestMotionPermission(){
-  try{
-    if (typeof DeviceMotionEvent !== 'undefined' &&
-        typeof DeviceMotionEvent.requestPermission === 'function'){
-      await DeviceMotionEvent.requestPermission().catch(()=>{});
+function initRopes(){
+  anchors.length = 0; ropes.length = 0;
+  const cx = width/2;
+  for (let r=0; r<NUM_ROPES; r++){
+    anchors.push(createVector(cx + (r-1)*ANCHOR_SPACING, ANCHOR_Y));
+    let nodes = [];
+    for (let i=0; i<SEGMENTS; i++){
+      const p = createVector(anchors[r].x, ANCHOR_Y + i*REST_LEN);
+      nodes.push({ pos: p.copy(), prev: p.copy() });
     }
-    if (typeof DeviceOrientationEvent !== 'undefined' &&
-        typeof DeviceOrientationEvent.requestPermission === 'function'){
-      await DeviceOrientationEvent.requestPermission().catch(()=>{});
-    }
-  }catch(e){}
-  window.addEventListener('deviceorientation', onOrient);
-  enableBtn.remove();
-}
-
-function onOrient(e){
-  const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-  let raw = isLandscape ? (e.beta ?? 0) : (e.gamma ?? 0);
-  raw = constrain(raw, -60, 60);
-  tilt = raw / 45; // -1..1
+    ropes.push(nodes);
+  }
 }
 
 function draw(){
   background(245);
-  smoothTilt = lerp(smoothTilt, tilt, 0.15);
 
-  for(const rope of ropes){
-    const segs = rope.segs;
+  // 1) アンカーを傾きで左右に（-45..45度→-1..1に正規化）
+  const sway = constrain(tiltX/45, -1, 1);
+  for (let r=0; r<NUM_ROPES; r++){
+    anchors[r].x = width/2 + (r-1)*ANCHOR_SPACING + sway*SWAY_AMPL;
+    anchors[r].y = ANCHOR_Y;
+  }
 
-    // 上端を傾きで左右へ
-    const amp = 220;
-    segs[0].x = rope.baseX + smoothTilt * amp;
-    segs[0].y = rope.baseY;
-    
-  // --- 各節を更新：長さを必ず SEG_LEN に保つ（巻き取り防止） ---
-  for (let i = 1; i < NUM_SEG; i++) {
-  const prev = segs[i - 1], cur = segs[i];
+  // 2) 物理更新（Verlet）
+  for (let r=0; r<NUM_ROPES; r++){
+    const chain = ropes[r];
 
-  // 前節→現在節ベクトル
-  let dx = cur.x - prev.x;
-  let dy = cur.y - prev.y;
-  let dist = sqrt(dx*dx + dy*dy) || 1;
+    // アンカー固定
+    chain[0].pos.set(anchors[r].x, anchors[r].y);
 
-  // 目標位置（前節からちょうど SEG_LEN 離れた点）
-  const tx = prev.x + (dx / dist) * SEG_LEN;
-  const ty = prev.y + (dy / dist) * SEG_LEN;
+    // 速度=pos-prev / 慣性 / 重力
+    for (let i=1; i<SEGMENTS; i++){
+      const n = chain[i];
+      let vx = (n.pos.x - n.prev.x) * DAMPING;
+      let vy = (n.pos.y - n.prev.y) * DAMPING + GRAVITY;
 
-  // ばね的に近づける（k を小さくすると柔らかく）
-  const k = HINGES.includes(i) || HINGES.includes(i - 1) ? 0.18 : 0.35;
-  cur.x = lerp(cur.x, tx, k);
-  cur.y = lerp(cur.y, ty, k);
+      n.prev.set(n.pos.x, n.pos.y);
+      n.pos.x += vx;
+      n.pos.y += vy;
+    }
 
-  // （任意）ほんの少し重力を足すと“垂れ”が出る
-  cur.y += 0.15;
-} 
- 
-
-    // ロープ描画
-    stroke(rope.col[0], rope.col[1], rope.col[2]);
-    strokeWeight(4);
-    noFill();
-    beginShape();
-    for(const p of segs) vertex(p.x, p.y);
-    endShape();
-
-    // 先端の丸
-    noStroke(); fill(rope.col[0], rope.col[1], rope.col[2]);
-    const tip = segs[NUM_SEG-1];
-    circle(tip.x, tip.y, 16);
-
-    // 関節マーカー（視覚化）
-    fill(rope.col[0], rope.col[1], rope.col[2], 180);
-    for(const h of HINGES){
-      const p = segs[h];
-      circle(p.x, p.y, 12);
+    // 距離拘束をSOLVE_ITERS回
+    for (let k=0; k<SOLVE_ITERS; k++){
+      // 節間長をREST_LENに保つ
+      for (let i=0; i<SEGMENTS-1; i++){
+        let a = chain[i], b = chain[i+1];
+        let dx = b.pos.x - a.pos.x;
+        let dy = b.pos.y - a.pos.y;
+        let dist = sqrt(dx*dx + dy*dy) || 0.0001;
+        let diff = (dist - REST_LEN) / dist;
+        // aはアンカー（i==0）なので動かさない
+        const corrX = dx * 0.5 * diff;
+        const corrY = dy * 0.5 * diff;
+        if (i>0){ a.pos.x += corrX; a.pos.y += corrY; }
+        b.pos.x -= corrX; b.pos.y -= corrY;
+      }
+      // アンカーに再ピン留め
+      chain[0].pos.set(anchors[r].x, anchors[r].y);
     }
   }
 
-  // ラベル
-  fill(0); noStroke();
-  text(`tilt: ${smoothTilt.toFixed(2)}   hinges at seg ${HINGES.join(', ')}`, 10, height-14);
+  // 3) 描画
+  const colors = [
+    color(0,0,0,220),        // 黒
+    color(70,140,255,220),   // 青
+    color(240,70,70,220)     // 赤
+  ];
+  strokeWeight(4);
+  noFill();
+
+  for (let r=0; r<NUM_ROPES; r++){
+    stroke(colors[r]);
+    beginShape();
+    for (let i=0; i<SEGMENTS; i++){
+      vertex(ropes[r][i].pos.x, ropes[r][i].pos.y);
+    }
+    endShape();
+
+    // 先端の重り
+    const tip = ropes[r][SEGMENTS-1].pos;
+    fill(colors[r]); noStroke();
+    circle(tip.x, tip.y, 16);
+    noFill();
+  }
+
+  // UI
+  noStroke(); fill(0);
+  text(`tilt: ${nf(tiltX,1,2)}   gravity:${GRAVITY}  len:${REST_LEN}`, 12, height-16);
 }
 
-function windowResized(){ resizeCanvas(windowWidth, windowHeight); }
+function windowResized(){ resizeCanvas(windowWidth, windowHeight); initRopes(); }
