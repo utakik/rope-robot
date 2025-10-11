@@ -66,30 +66,29 @@ function draw(){
     const amp = 220;
     segs[0].x = rope.baseX + smoothTilt * amp;
     segs[0].y = rope.baseY;
+    
+  // --- 各節を更新：長さを必ず SEG_LEN に保つ（巻き取り防止） ---
+  for (let i = 1; i < NUM_SEG; i++) {
+  const prev = segs[i - 1], cur = segs[i];
 
-    // 節ごとの追従。関節の節は柔らかめ（係数小さめ）
-    for(let i=1;i<NUM_SEG;i++){
-      const prev = segs[i-1], cur = segs[i];
+  // 前節→現在節ベクトル
+  let dx = cur.x - prev.x;
+  let dy = cur.y - prev.y;
+  let dist = sqrt(dx*dx + dy*dy) || 1;
 
-      // 目標位置（前節からSEG_LENだけ離れた点）
-      const dx = prev.x - cur.x, dy = prev.y - cur.y;
-      const dist = sqrt(dx*dx + dy*dy) || 0.0001;
-      const ux = dx/dist, uy = dy/dist;
+  // 目標位置（前節からちょうど SEG_LEN 離れた点）
+  const tx = prev.x + (dx / dist) * SEG_LEN;
+  const ty = prev.y + (dy / dist) * SEG_LEN;
 
-      // 係数（硬さ）：通常0.35、関節周辺は0.18に
-      let k = 0.35;
-      if (HINGES.includes(i) || HINGES.includes(i-1)) k = 0.18;
+  // ばね的に近づける（k を小さくすると柔らかく）
+  const k = HINGES.includes(i) || HINGES.includes(i - 1) ? 0.18 : 0.35;
+  cur.x = lerp(cur.x, tx, k);
+  cur.y = lerp(cur.y, ty, k);
 
-      // ばね的に近づける
-      const diff = SEG_LEN - dist;
-      cur.x -= ux * diff * k;
-      cur.y -= uy * diff * k;
-
-      // わずかな減衰（発散防止）
-      const tx = prev.x - ux*SEG_LEN, ty = prev.y - uy*SEG_LEN;
-      cur.x = lerp(cur.x, tx, 0.05);
-      cur.y = lerp(cur.y, ty, 0.05);
-    }
+  // （任意）ほんの少し重力を足すと“垂れ”が出る
+  cur.y += 0.15;
+} 
+ 
 
     // ロープ描画
     stroke(rope.col[0], rope.col[1], rope.col[2]);
