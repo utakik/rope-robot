@@ -1,7 +1,7 @@
 // --- 3-joint ropes (tilt) — monotonic enforced ---
 // 下ほど角度が大きい & 方向が揃うのを後処理で強制
 
-const VERSION = "2025-10-11-05"; // ←いまの番号に合わせる
+const VERSION = "2025-10-11-06"; // ←いまの番号に合わせる
 
 const NUM_ROPES = 3;
 const SEG = 4;               // 0=root,1=mid,2=lower,3=tip
@@ -10,7 +10,7 @@ const ANCHOR_Y = 160;
 const SPACING = 90;
 
 const SWAY_AMPL = 160;
-const GAIN = [0.65, 1.10, 1.45]; // ←差を大きめにして tip を強く
+const GAIN = [0.65, 0.3, 1.45]; // ←差を大きめにして tip を強く
 const KX   = [0.18, 0.22, 0.26]; // 下ほど速く
 const KY   = [0.11, 0.13, 0.15];
 const DAMP = [0.93, 0.92, 0.91];
