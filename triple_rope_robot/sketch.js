@@ -1,5 +1,7 @@
-// --- 3-joint ropes (tilt) — monotonic bend (cascade targets) ---
-const VERSION = "2025-10-11-04";
+// --- 3-joint ropes (tilt) — monotonic enforced ---
+// 下ほど角度が大きい & 方向が揃うのを後処理で強制
+
+const VERSION = "2025-10-11-05"; // ←いまの番号に合わせる
 
 const NUM_ROPES = 3;
 const SEG = 4;               // 0=root,1=mid,2=lower,3=tip
@@ -8,16 +10,14 @@ const ANCHOR_Y = 160;
 const SPACING = 90;
 
 const SWAY_AMPL = 160;
-const REL_GAIN = [0.55, 0.65, 0.80]; // ← 残り距離に対する割合（mid < lower < tip）
-
-const KX  = [0.18, 0.20, 0.24];      // 横追従（mid < lower < tip）
-const KY  = [0.11, 0.13, 0.15];      // 縦ばね
-const DAMP= [0.93, 0.92, 0.91];      // 減衰
-const MAX_STEP = [12, 14, 18];       // 一歩の上限
+const GAIN = [0.65, 1.10, 1.45]; // ←差を大きめにして tip を強く
+const KX   = [0.18, 0.22, 0.26]; // 下ほど速く
+const KY   = [0.11, 0.13, 0.15];
+const DAMP = [0.93, 0.92, 0.91];
+const MAX_STEP = [12, 14, 18];
 const ITER = 5;
 const SWAY_LP = 0.18;
-const TIP_BIAS = 0.7;                // 拘束の配分：下側を多め
-const MONO_MARGIN = 1.06;            // 単調性ガード：下ほど 6% 以上大きく
+const TIP_BIAS = 0.7;
 
 let tiltX = 0, swayLP = 0;
 let ropes = [];
@@ -25,12 +25,8 @@ let cnv;
 
 function setup(){
   cnv = createCanvas(windowWidth, windowHeight);
-  cnv.position(0,0);
-  cnv.style('position','fixed');
-  cnv.style('inset','0');
-  cnv.style('touch-action','none');
-  document.body.style.margin='0';
-  document.body.style.overscrollBehavior='none';
+  cnv.position(0,0); cnv.style('position','fixed'); cnv.style('inset','0'); cnv.style('touch-action','none');
+  document.body.style.margin='0'; document.body.style.overscrollBehavior='none';
   window.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
   pixelDensity(1);
 
@@ -55,10 +51,10 @@ function initRopes(){
   for (let r=0; r<NUM_ROPES; r++){
     const ax = cx + (r-1)*SPACING;
     ropes.push([
-      { x: ax, y: ANCHOR_Y,          vy: 0 },         // root
-      { x: ax, y: ANCHOR_Y + REST,   vy: 0 },         // mid
-      { x: ax, y: ANCHOR_Y + REST*2, vy: 0 },         // lower
-      { x: ax, y: ANCHOR_Y + REST*3, vy: 0 },         // tip
+      { x: ax, y: ANCHOR_Y,          vy: 0 },
+      { x: ax, y: ANCHOR_Y + REST,   vy: 0 },
+      { x: ax, y: ANCHOR_Y + REST*2, vy: 0 },
+      { x: ax, y: ANCHOR_Y + REST*3, vy: 0 },
     ]);
   }
 }
@@ -71,42 +67,38 @@ function draw(){
 
   for (let r=0; r<NUM_ROPES; r++){
     const rope = ropes[r];
+    const root = rope[0];
 
     // 根元固定
-    rope[0].x = width/2 + (r-1)*SPACING;
-    rope[0].y = ANCHOR_Y;
+    root.x = width/2 + (r-1)*SPACING;
+    root.y = ANCHOR_Y;
 
-    const rootX = rope[0].x;
-    const baseX = rootX + swayLP * SWAY_AMPL;
+    const baseX = root.x + swayLP * SWAY_AMPL;
 
-    // --- 1) カスケード目標X（root→mid→lower→tip の順で“残り距離”の割合）
-    let targ = [rootX, 0, 0, 0];
+    // --- 横：目標 → 追従（節ごとに深さ係数）
     for (let i=1; i<SEG; i++){
-      targ[i] = targ[i-1] + (baseX - targ[i-1]) * REL_GAIN[i-1];
-    }
-    // ここで |targ[1]-rootX| < |targ[2]-rootX| < |targ[3]-rootX| が必ず成立
-
-    // --- 2) 横：各節を target に追従（ステップ上限つき）
-    for (let i=1; i<SEG; i++){
-      rope[i].x = stepToward(rope[i].x, targ[i], KX[i-1], MAX_STEP[i-1]);
+      const targetX = root.x + (baseX - root.x) * GAIN[i-1];
+      rope[i].x = stepToward(rope[i].x, targetX, KX[i-1], MAX_STEP[i-1]);
     }
 
-    // --- 3) 縦：ばね＋減衰（相対）
+    // ★ 単調性を強制（方向を揃える）
+    // dir>0: 右へ行くほどxが増える / dir<0: 減る
+    const dir = Math.sign(baseX - root.x) || 1;
+    enforceMonotonicX(rope, dir, 0.0001);
+
+    // --- 縦：相対ばね + 減衰
     for (let i=1; i<SEG; i++){
-      const ty = rope[i-1].y + REST;
-      rope[i].vy = (rope[i].vy + (ty - rope[i].y) * KY[i-1]) * DAMP[i-1];
+      const targetY = rope[i-1].y + REST;
+      rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY[i-1]) * DAMP[i-1];
       rope[i].y  += rope[i].vy;
     }
 
-    // --- 4) 長さ拘束（複数回）
+    // --- 長さ拘束（下ほど優先）
     for (let k=0; k<ITER; k++){
       for (let i=1; i<SEG; i++){
-        constraintBias(rope[i-1], rope[i], REST, (i==1), TIP_BIAS);
+        constraintBias(rope[i-1], rope[i], REST, (i===1), TIP_BIAS);
       }
     }
-
-    // --- 5) 単調性ガード（角度が必ず増えるよう微調整）
-    enforceMonotone(rope, rootX);
   }
 
   // 描画
@@ -114,8 +106,7 @@ function draw(){
   strokeWeight(4); noFill();
   for (let r=0; r<NUM_ROPES; r++){
     const rope = ropes[r];
-    stroke(cols[r]);
-    beginShape();
+    stroke(cols[r]); beginShape();
     for (let i=0; i<SEG; i++) vertex(rope[i].x, rope[i].y);
     endShape();
     const tip = rope[SEG-1];
@@ -124,7 +115,7 @@ function draw(){
 
   // バージョン表示
   noStroke(); fill(0,160);
-  rect(10,10,180,36,8);
+  rect(10,10,150,36,8);
   fill(255); textSize(14); textAlign(LEFT,CENTER);
   text(`ver: ${VERSION}`, 20,28);
 }
@@ -134,6 +125,15 @@ function stepToward(current, target, k, maxStep){
   let d = next - current;
   if (Math.abs(d) > maxStep) next = current + Math.sign(d) * maxStep;
   return next;
+}
+
+// 方向(dir)に沿って x を単調に並べ替える（下ほど角度が深く見える）
+function enforceMonotonicX(rope, dir, eps=0){
+  for (let i=1; i<rope.length; i++){
+    const prev = rope[i-1].x;
+    if (dir > 0 && rope[i].x < prev + eps) rope[i].x = prev + eps;
+    if (dir < 0 && rope[i].x > prev - eps) rope[i].x = prev - eps;
+  }
 }
 
 function constraintBias(a, b, rest, lockA, biasToB){
@@ -146,25 +146,6 @@ function constraintBias(a, b, rest, lockA, biasToB){
   const wa = lockA ? 0 : (1 - wb);
   b.x -= dx * wb * diff; b.y -= dy * wb * diff;
   if (!lockA){ a.x += dx * wa * diff; a.y += dy * wa * diff; }
-}
-
-// 角度（実際は水平変位の大きさ）を単調増加に揃える
-function enforceMonotone(rope, rootX){
-  const dx1 = Math.abs(rope[1].x - rootX);
-  const dx2 = Math.abs(rope[2].x - rootX);
-  const dx3 = Math.abs(rope[3].x - rootX);
-
-  // mid → lower
-  if (dx2 < dx1 * MONO_MARGIN){
-    const want = Math.sign(rope[2].x - rootX) * (dx1 * MONO_MARGIN);
-    rope[2].x = lerp(rope[2].x, rootX + want, 0.35);
-  }
-  // lower → tip
-  const newDx2 = Math.abs(rope[2].x - rootX);
-  if (dx3 < newDx2 * MONO_MARGIN){
-    const want = Math.sign(rope[3].x - rootX) * (newDx2 * MONO_MARGIN);
-    rope[3].x = lerp(rope[3].x, rootX + want, 0.35);
-  }
 }
 
 function windowResized(){ resizeCanvas(windowWidth, windowHeight); initRopes(); }
