@@ -9,7 +9,7 @@ const ANCHOR_Y = 160;
 const SPACING = 90;
 
 const SWAY_AMPL = 160;
-const GAIN = [0.65, 2, 1.45];
+const GAIN = [0.3, 2, 3];
 const KX   = [0.18, 0.22, 0.26];
 const KY   = [0.11, 0.13, 0.15];
 const DAMP = [0.93, 0.92, 0.91];
