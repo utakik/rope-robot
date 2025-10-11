@@ -1,47 +1,43 @@
-// --- 2-joint ropes (tilt) — monotonic bend ---
-// 目的: 下に行くほど角度が大きい（同方向で tip > mid）
-// 手法: 目標Xに深さ係数を導入 (MID_GAIN < TIP_GAIN) + ばね + 長さ拘束
+// --- 3-joint ropes (tilt) — monotonic bend ---
+// 目的: 下に行くほど角度が大きい（同方向で tip > lower > mid）
+// 構造: root(固定) - mid - lower - tip
 
-// ====== バージョン定義 ======
-const VERSION = "2025-10-11-01";   // ← index.html の ?v と一致させる
-// ============================
+const VERSION = "2025-10-11-02";   // index.html の ?v と一致させる
 
 const NUM_ROPES = 3;
-const SEG = 3;               // 0=root,1=mid,2=tip
-const REST = 60;
+const SEG = 4;               // 0=root,1=mid,2=lower,3=tip
+const REST = 56;
 const ANCHOR_Y = 160;
 const SPACING = 90;
 
-const SWAY_AMPL = 160;       // 基準振れ幅（root基準）
-const MID_GAIN  = 0.85;      // 中節の深さ係数（<1）
-const TIP_GAIN  = 1.20;      // 先端の深さ係数（>1）←ここで tip > mid を保証
+const SWAY_AMPL = 160;
+const GAIN = [0.7, 1.0, 1.25]; // 各節の深さ係数（下ほど大きい）
 
-const KX_MID = 0.20;         // mid の横追従
-const KX_TIP = 0.24;         // tip の横追従（やや速く）
-const MAX_STEP_MID = 14;     // mid 1フレーム最大移動
-const MAX_STEP_TIP = 18;     // tip 1フレーム最大移動
-
-const KY_MID = 0.12, DAMP_MID = 0.93; // 縦ばね/減衰（mid）
-const KY_TIP = 0.14, DAMP_TIP = 0.92; // 縦ばね/減衰（tip）←軽めに
-
-const ITER = 4;              // 長さ拘束の反復回数
-const TIP_BIAS = 0.7;        // 拘束配分：tip側を多めに動かす
-const SWAY_LP = 0.18;        // 傾きLPF
+const KX = [0.18, 0.22, 0.26];  // 各節の横追従係数
+const KY = [0.11, 0.13, 0.15];  // 各節の縦ばね
+const DAMP = [0.93, 0.92, 0.91];// 各節の減衰
+const MAX_STEP = [12, 14, 18];  // 横方向の最大移動量
+const ITER = 5;
+const SWAY_LP = 0.18;
+const TIP_BIAS = 0.7;
 
 let tiltX = 0, swayLP = 0;
-let ropes = []; // [ [root, mid, tip], ... ] 各点 {x,y,vy}
+let ropes = [];
 let cnv;
 
 function setup(){
   cnv = createCanvas(windowWidth, windowHeight);
-  cnv.position(0,0); cnv.style('position','fixed'); cnv.style('inset','0'); cnv.style('touch-action','none');
-  document.body.style.margin='0'; document.body.style.overscrollBehavior='none';
+  cnv.position(0,0);
+  cnv.style('position','fixed');
+  cnv.style('inset','0');
+  cnv.style('touch-action','none');
+  document.body.style.margin='0';
+  document.body.style.overscrollBehavior='none';
   window.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
   pixelDensity(1);
 
   initRopes();
 
-  // iOS 傾き許可
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       DeviceOrientationEvent.requestPermission) {
     const btn = createButton('Enable Tilt');
@@ -50,11 +46,9 @@ function setup(){
   }
   window.addEventListener('deviceorientation', e => { tiltX = e.gamma ?? 0; });
 
-  // ====== バージョン情報をタイトルとログに反映 ======
   window.__APP_VERSION__ = VERSION;
   document.title = `tilt-ropes ${VERSION}`;
   console.log("App version:", VERSION);
-  // ====================================================
 }
 
 function initRopes(){
@@ -63,9 +57,10 @@ function initRopes(){
   for (let r=0; r<NUM_ROPES; r++){
     const ax = cx + (r-1)*SPACING;
     ropes.push([
-      { x: ax, y: ANCHOR_Y,          vy: 0 },         // root
-      { x: ax, y: ANCHOR_Y + REST,   vy: 0 },         // mid
-      { x: ax, y: ANCHOR_Y + REST*2, vy: 0 },         // tip
+      { x: ax, y: ANCHOR_Y,          vy: 0 },
+      { x: ax, y: ANCHOR_Y + REST,   vy: 0 },
+      { x: ax, y: ANCHOR_Y + REST*2, vy: 0 },
+      { x: ax, y: ANCHOR_Y + REST*3, vy: 0 },
     ]);
   }
 }
@@ -73,38 +68,34 @@ function initRopes(){
 function draw(){
   background(245);
 
-  // 傾き [-1..1] → LPF
   const sway = constrain(tiltX/45, -1, 1);
   swayLP = lerp(swayLP, sway, SWAY_LP);
 
   for (let r=0; r<NUM_ROPES; r++){
     const rope = ropes[r];
-    const root = rope[0], mid = rope[1], tip = rope[2];
+    rope[0].x = width/2 + (r-1)*SPACING;
+    rope[0].y = ANCHOR_Y;
 
-    // 根元固定
-    root.x = width/2 + (r-1)*SPACING;
-    root.y = ANCHOR_Y;
+    const baseX = rope[0].x + swayLP * SWAY_AMPL;
 
-    // --- 目標X（深さ係数で mid < tip を保証）
-    const baseX = root.x + swayLP * SWAY_AMPL;
-    const targetMidX = root.x + (baseX - root.x) * MID_GAIN;
-    const targetTipX = root.x + (baseX - root.x) * TIP_GAIN;
+    // 各節のターゲットXを算出
+    for (let i=1; i<SEG; i++){
+      const targetX = rope[0].x + (baseX - rope[0].x) * GAIN[i-1];
+      rope[i].x = stepToward(rope[i].x, targetX, KX[i-1], MAX_STEP[i-1]);
+    }
 
-    // 横：追従（ステップ上限つき）
-    mid.x = stepToward(mid.x, targetMidX, KX_MID, MAX_STEP_MID);
-    tip.x = stepToward(tip.x, targetTipX, KX_TIP, MAX_STEP_TIP);
+    // 縦方向のばね
+    for (let i=1; i<SEG; i++){
+      const targetY = rope[i-1].y + REST;
+      rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY[i-1]) * DAMP[i-1];
+      rope[i].y += rope[i].vy;
+    }
 
-    // 縦：相対ばね + 減衰
-    const targetY1 = root.y + REST;
-    mid.vy = (mid.vy + (targetY1 - mid.y) * KY_MID) * DAMP_MID;  mid.y += mid.vy;
-
-    const targetY2 = mid.y + REST;
-    tip.vy = (tip.vy + (targetY2 - tip.y) * KY_TIP) * DAMP_TIP;  tip.y += tip.vy;
-
-    // 長さ拘束（複数回）— tip側にバイアス
+    // 拘束の反復（下ほど優先）
     for (let k=0; k<ITER; k++){
-      constraintBias(root, mid, REST, /*lockA=*/true,  /*biasToB=*/1.0);
-      constraintBias(mid,  tip, REST, /*lockA=*/false, /*biasToB=*/TIP_BIAS);
+      for (let i=1; i<SEG; i++){
+        constraintBias(rope[i-1], rope[i], REST, (i==1), TIP_BIAS);
+      }
     }
   }
 
@@ -112,23 +103,23 @@ function draw(){
   const cols = [color(0,0,0,220), color(70,140,255,220), color(240,70,70,220)];
   strokeWeight(4); noFill();
   for (let r=0; r<NUM_ROPES; r++){
-    const [a,b,c] = ropes[r];
+    const rope = ropes[r];
     stroke(cols[r]);
     beginShape();
-    vertex(a.x,a.y); vertex(b.x,b.y); vertex(c.x,c.y);
+    for (let i=0; i<SEG; i++) vertex(rope[i].x, rope[i].y);
     endShape();
-    fill(cols[r]); noStroke(); circle(c.x, c.y, 18); noFill();
+    const tip = rope[SEG-1];
+    fill(cols[r]); noStroke(); circle(tip.x, tip.y, 18); noFill();
   }
 
-  // ====== 画面にバージョン表示 ======
+  // バージョン表示
   noStroke(); fill(0,160);
   rect(10,10,150,36,8);
   fill(255); textSize(14); textAlign(LEFT,CENTER);
   text(`ver: ${VERSION}`, 20,28);
-  // ===================================
 
-  noStroke(); fill(0);
-  text(`tilt:${nf(tiltX,1,2)}  gains M:${MID_GAIN} T:${TIP_GAIN}`, 12, height-16);
+  fill(0);
+  text(`tilt:${nf(tiltX,1,2)}`, 12, height-16);
 }
 
 function stepToward(current, target, k, maxStep){
