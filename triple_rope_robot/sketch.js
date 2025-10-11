@@ -69,17 +69,24 @@ function draw(){
     const driveX = anchorX + sway * SWAY_AMPL;
     rope[1].x += (driveX - rope[1].x) * KX_TOP;
 
-    // 2節目の縦は基準へ戻す
-    rope[1].vy = (rope[1].vy + ((ANCHOR_Y + 1*REST) - rope[1].y) * KY) * DAMP;
+
+    // 2節目の縦：ひとつ上 + REST を目標に（相対）
+    const targetY1 = rope[0].y + REST;
+    rope[1].vy = (rope[1].vy + (targetY1 - rope[1].y) * KY) * DAMP;
     rope[1].y  += rope[1].vy;
 
-    // 3節目以降：上に追従（横）＋ 縦ばね
+    // 3節目以降
+    // 横方向の“張り”を少し強めに伝える（前→後、後→前）
+    for (let pass=0; pass<2; pass++){
     for (let i=2; i<SEG; i++){
-      rope[i].x += (rope[i-1].x - rope[i].x) * KX;
+    rope[i].x += (rope[i-1].x - rope[i].x) * KX;
+   }
+ }
 
-      const targetY = ANCHOR_Y + i*REST;
-      rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY) * DAMP;
-      rope[i].y  += rope[i].vy;
+    const targetY = rope[i-1].y + REST;   // ← 相対に変更
+    rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY) * DAMP;
+    rope[i].y  += rope[i].vy;
+  }
     }
   }
 
