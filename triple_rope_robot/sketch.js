@@ -18,7 +18,7 @@ const KY  = 0.12;            // 縦ばね
 const DAMP= 0.93;            // 縦減衰
 const SWAY_LP = 0.18;        // 傾きLPF
 
-const ITER = 4;              // ← 長さ拘束の反復回数（まずは4、重ければ3）
+const ITER = 5;              // ← 長さ拘束の反復回数（まずは4、重ければ3）
 const BEND = 0.08;           // ← 中間節の曲がり平滑化（0〜0.15くらい）
 
 let tiltX = 0, swayLP = 0;
