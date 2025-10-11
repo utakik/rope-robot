@@ -12,7 +12,7 @@ const SPACING = 90;
 
 const SWAY_AMPL = 160;       // ←少し控えめに（急激な目標で伸びが出やすい）
 const MAX_STEP = 18;         // ←1フレームで mid.x が動ける最大px（抑制）
-const KX1 = 0.22;            // mid 横追従（強すぎると角が出やすい）
+const KX1 = 0.16;            // mid 横追従（強すぎると角が出やすい）
 const KX2 = 0.18;            // tip 横追従（midに遅れて追従）
 const KY  = 0.12;            // 縦ばね
 const DAMP= 0.93;            // 縦減衰
