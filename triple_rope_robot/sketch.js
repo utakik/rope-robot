@@ -11,7 +11,7 @@ const ANCHOR_Y = 160;
 const SPACING = 90;
 
 const SWAY_AMPL = 160;
-const GAIN = [0.7, 1.0, 1.25]; // 各節の深さ係数（下ほど大きい）
+const GAIN = [0.7, 1.25, 1.7]; // 各節の深さ係数（下ほど大きい）
 
 const KX = [0.18, 0.22, 0.26];  // 各節の横追従係数
 const KY = [0.11, 0.13, 0.15];  // 各節の縦ばね
