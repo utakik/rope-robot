@@ -1,31 +1,42 @@
-// --- Simple soft chain ropes (tilt driven) ---
-// 横: 上の節に追従、縦: 基準yへバネ戻り（確実に下へ戻る）
+// --- Fixed anchor + soft chain (tilt) ---
+// 根元は固定。上から2節目をswayで横に駆動。キャンバスは固定。
 
 const NUM_ROPES = 3;
 const SEG = 12;
-const REST = 28;               // 節間の基準間隔
+const REST = 28;
 const ANCHOR_Y = 140;
-const SPACING = 90;            // 吊点の左右間隔
-const SWAY_AMPL = 220;         // 傾き→左右最大振れ
+const SPACING = 90;
 
-// 調整パラメータ（効き順）
-const KX = 0.35;               // 横追従の強さ（0.2〜0.6）
-const KY = 0.12;               // 縦ばねの強さ（0.08〜0.2）
-const DAMP = 0.90;             // 縦速度の減衰（0.85〜0.96）
+const SWAY_AMPL = 220; // 駆動点(2節目)の左右可動幅
+const KX_TOP = 0.45;   // 2節目の横追従（根元に近いので強め）
+const KX = 0.30;       // それ以降の横追従
+const KY = 0.12;       // 縦のばね
+const DAMP = 0.90;     // 縦速度の減衰
 
 let tiltX = 0;
-let ropes = []; // ropes[r][i] = {x, y, vy}
+let ropes = []; // {x,y,vy}
+let canvasRef;
 
 function setup(){
-  createCanvas(windowWidth, windowHeight);
+  canvasRef = createCanvas(windowWidth, windowHeight);
+
+  // キャンバス固定＆スクロール抑止
+  canvasRef.position(0, 0);
+  canvasRef.style('position', 'fixed');
+  canvasRef.style('touch-action', 'none');
+  document.body.style.margin = '0';
+  document.body.style.overscrollBehavior = 'none';
+  window.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
+
   pixelDensity(1);
   initRopes();
 
-  // iOSの許可ボタン
+  // iOSの許可
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       DeviceOrientationEvent.requestPermission) {
-    const btn = createButton('Enable Tilt'); btn.position(12,12);
-    btn.mousePressed(async ()=>{ try{await DeviceOrientationEvent.requestPermission();}catch(e){} btn.remove(); });
+    const btn = createButton('Enable Tilt');
+    btn.position(12,12);
+    btn.mousePressed(async()=>{ try{await DeviceOrientationEvent.requestPermission();}catch(e){} btn.remove(); });
   }
   window.addEventListener('deviceorientation', e => { tiltX = e.gamma || 0; });
 }
@@ -46,22 +57,26 @@ function initRopes(){
 function draw(){
   background(245);
 
-  // 傾き（-45..45°）→ (-1..1)
   const sway = constrain(tiltX/45, -1, 1);
 
-  // 各ロープ更新
   for (let r=0; r<NUM_ROPES; r++){
     const rope = ropes[r];
-    // 上端アンカー（xのみ傾きでスライド）
-    rope[0].x = width/2 + (r-1)*SPACING + sway*SWAY_AMPL;
+    const anchorX = width/2 + (r-1)*SPACING; // ← ルートは固定
+    rope[0].x = anchorX;
     rope[0].y = ANCHOR_Y;
 
-    // 下へ順に更新：横=上に寄せる、縦=基準へバネ戻り+減衰
-    for (let i=1; i<SEG; i++){
-      // 横：上の節にゆっくり追従
+    // 駆動点 = 2節目(インデックス1) を左右に引く
+    const driveX = anchorX + sway * SWAY_AMPL;
+    rope[1].x += (driveX - rope[1].x) * KX_TOP;
+
+    // 2節目の縦は基準へ戻す
+    rope[1].vy = (rope[1].vy + ((ANCHOR_Y + 1*REST) - rope[1].y) * KY) * DAMP;
+    rope[1].y  += rope[1].vy;
+
+    // 3節目以降：上に追従（横）＋ 縦ばね
+    for (let i=2; i<SEG; i++){
       rope[i].x += (rope[i-1].x - rope[i].x) * KX;
 
-      // 縦：基準位置へ戻るばね＋減衰（必ず下に戻る）
       const targetY = ANCHOR_Y + i*REST;
       rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY) * DAMP;
       rope[i].y  += rope[i].vy;
@@ -81,7 +96,7 @@ function draw(){
   }
 
   noStroke(); fill(0);
-  text(`tilt:${nf(tiltX,1,2)}  KX:${KX} KY:${KY} DAMP:${DAMP}`, 12, height-14);
+  text(`tilt:${nf(tiltX,1,2)}  (root fixed)`, 12, height-14);
 }
 
 function windowResized(){ resizeCanvas(windowWidth, windowHeight); initRopes(); }
