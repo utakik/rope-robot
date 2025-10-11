@@ -1,18 +1,17 @@
-// --- 1-joint rope test (tilt) ---
-// 各ロープは「根元(固定) + 先端(可動)」の2点だけ。
-// xは傾きで目標に追従、yはばね＋減衰で安定させる。
+// --- 1-joint rope test (tilt) + distance constraint ---
+// 根元(固定)–先端(可動)の2点だけ。最後に距離拘束で REST を厳密維持。
 
 const NUM_ROPES = 3;
-const SEG = 2;           // ← 関節数1（節は2点：0=根元,1=先端）
-const REST = 60;         // 根元-先端の自然長（見やすく少し長めに）
+const SEG = 2;           // 関節1（点は0=根元,1=先端）
+const REST = 60;         // 根元-先端の自然長
 const ANCHOR_Y = 160;
 const SPACING = 90;
 
-const SWAY_AMPL = 180;   // 傾き→左右の最大振れ
-const KX_ONE = 0.28;     // 先端の横追従（大きい=速いが硬い）
-const KY_ONE = 0.12;     // 縦のばね（大きい=戻りが強い）
-const DAMP = 0.93;       // 縦速度の減衰（大きい=ゆっくり止まる）
-const SWAY_LP = 0.18;    // 傾きスムージング
+const SWAY_AMPL = 160;   // 左右の最大振れ（控えめ推奨）
+const KX_ONE = 0.24;     // 先端の横追従（小さいほど柔らか）
+const KY_ONE = 0.11;     // 縦ばね（小さいほど“たるむ”）
+const DAMP   = 0.95;     // 縦速度の減衰（大きいほどゆっくり止まる）
+const SWAY_LP = 0.20;    // 傾きスムージング
 
 let tiltX = 0, swayLP = 0;
 let ropes = []; // ropes[r] = [{x,y,vy},{x,y,vy}]
@@ -42,7 +41,7 @@ function initRopes(){
   const cx = width/2;
   for (let r=0; r<NUM_ROPES; r++){
     const ax = cx + (r-1)*SPACING;
-    const root = { x: ax, y: ANCHOR_Y, vy: 0 };            // 根元（描画には使うが固定）
+    const root = { x: ax, y: ANCHOR_Y, vy: 0 };            // 根元（固定）
     const tip  = { x: ax, y: ANCHOR_Y + REST, vy: 0 };     // 先端（可動）
     ropes.push([root, tip]);
   }
@@ -51,7 +50,7 @@ function initRopes(){
 function draw(){
   background(245);
 
-  // 傾き→[-1..1] に正規化してLPF
+  // 傾き → [-1..1] に正規化してLPF
   const sway = constrain(tiltX/45, -1, 1);
   swayLP = lerp(swayLP, sway, SWAY_LP);
 
@@ -60,18 +59,24 @@ function draw(){
     const root = rope[0];
     const tip  = rope[1];
 
-    // 根元は固定（中央+間隔）
+    // 根元は固定（中央＋間隔）
     root.x = width/2 + (r-1)*SPACING;
     root.y = ANCHOR_Y;
 
-    // 先端X：傾きで左右へ目標追従
+    // 先端X：傾きで左右へ目標追従（やわらかく）
     const driveX = root.x + swayLP * SWAY_AMPL;
     tip.x += (driveX - tip.x) * KX_ONE;
 
-    // 先端Y：根元＋REST に戻るばね＋減衰
+    // 先端Y：根元+REST に戻るばね＋減衰
     const targetY = root.y + REST;
     tip.vy = (tip.vy + (targetY - tip.y) * KY_ONE) * DAMP;
     tip.y += tip.vy;
+
+    // ===== 距離拘束（伸び防止・最重要）=====
+    // 根元(固定)–先端 の距離を REST に“正確”に戻す
+    enforceDistance(root, tip, REST, /*rootFixed=*/true);
+    // ※ 安定性が足りなければ2回呼ぶ（軽く反復）
+    // enforceDistance(root, tip, REST, true);
   }
 
   // 描画
@@ -84,9 +89,32 @@ function draw(){
     fill(cols[r]); noStroke(); circle(tip.x, tip.y, 18); noFill();
   }
 
-  // デバッグ（目標位置のガイド）
+  // デバッグ
   noStroke(); fill(0);
-  text(`tilt:${nf(tiltX,1,2)}  SWAY_LP:${SWAY_LP}`, 12, height-16);
+  text(`tilt:${nf(tiltX,1,2)}  len=${nf(lengthOf(ropes[0][0], ropes[0][1]),1,1)}`, 12, height-16);
 }
+
+function enforceDistance(a, b, rest, rootFixed){
+  let dx = b.x - a.x, dy = b.y - a.y;
+  let d = Math.hypot(dx, dy);
+  if (d < 1e-6) { // ゼロ割回避
+    b.x += 0.001; d = Math.hypot(b.x - a.x, b.y - a.y);
+    dx = b.x - a.x; dy = b.y - a.y;
+  }
+  const diff = (d - rest) / d;
+  if (rootFixed){
+    // 根元は固定 → 先端だけ戻す（“正確”に長さを保つ）
+    b.x -= dx * diff;
+    b.y -= dy * diff;
+  }else{
+    // 双方向に半々で戻す（多関節で使う）
+    const corrX = dx * 0.5 * diff;
+    const corrY = dy * 0.5 * diff;
+    a.x += corrX; a.y += corrY;
+    b.x -= corrX; b.y -= corrY;
+  }
+}
+
+function lengthOf(a,b){ return Math.hypot(b.x - a.x, b.y - a.y); }
 
 function windowResized(){ resizeCanvas(windowWidth, windowHeight); initRopes(); }
