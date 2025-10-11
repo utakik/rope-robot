@@ -1,6 +1,6 @@
 // --- 3-joint ropes (tilt) — monotonic w/ soft center ---
 
-const VERSION = "2025-10-11-07";
+const VERSION = "2025-10-11-08";
 
 const NUM_ROPES = 3;
 const SEG = 4;               // 0=root,1=mid,2=lower,3=tip
@@ -9,7 +9,7 @@ const ANCHOR_Y = 160;
 const SPACING = 90;
 
 const SWAY_AMPL = 160;
-const GAIN = [0.3, 2, 3];
+const GAIN = [0.3, 1.6, 3.5];
 const KX   = [0.18, 0.22, 0.26];
 const KY   = [0.11, 0.13, 0.15];
 const DAMP = [0.93, 0.92, 0.91];
