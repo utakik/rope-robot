@@ -10,7 +10,7 @@ const SPACING = 90;
 
 const SWAY_AMPL = 220; // 駆動点(2節目)の左右可動幅
 const KX_TOP = 0.45;   // 2節目の横追従（根元に近いので強め）
-const KX = 0.30;       // それ以降の横追従
+const KX = 0.34;       // それ以降の横追従
 const KY = 0.12;       // 縦のばね
 const DAMP = 0.90;     // 縦速度の減衰
 
