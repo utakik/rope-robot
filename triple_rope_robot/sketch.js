@@ -2,6 +2,10 @@
 // 目的: 下に行くほど角度が大きい（同方向で tip > mid）
 // 手法: 目標Xに深さ係数を導入 (MID_GAIN < TIP_GAIN) + ばね + 長さ拘束
 
+// ====== バージョン定義 ======
+const VERSION = "2025-10-11-01";   // ← index.html の ?v と一致させる
+// ============================
+
 const NUM_ROPES = 3;
 const SEG = 3;               // 0=root,1=mid,2=tip
 const REST = 60;
@@ -45,6 +49,12 @@ function setup(){
     btn.mousePressed(async()=>{ try{await DeviceOrientationEvent.requestPermission();}catch(e){} btn.remove(); });
   }
   window.addEventListener('deviceorientation', e => { tiltX = e.gamma ?? 0; });
+
+  // ====== バージョン情報をタイトルとログに反映 ======
+  window.__APP_VERSION__ = VERSION;
+  document.title = `tilt-ropes ${VERSION}`;
+  console.log("App version:", VERSION);
+  // ====================================================
 }
 
 function initRopes(){
@@ -77,8 +87,8 @@ function draw(){
 
     // --- 目標X（深さ係数で mid < tip を保証）
     const baseX = root.x + swayLP * SWAY_AMPL;
-    const targetMidX = root.x + (baseX - root.x) * MID_GAIN; // 同方向・小さめ
-    const targetTipX = root.x + (baseX - root.x) * TIP_GAIN; // 同方向・大きめ
+    const targetMidX = root.x + (baseX - root.x) * MID_GAIN;
+    const targetTipX = root.x + (baseX - root.x) * TIP_GAIN;
 
     // 横：追従（ステップ上限つき）
     mid.x = stepToward(mid.x, targetMidX, KX_MID, MAX_STEP_MID);
@@ -93,8 +103,8 @@ function draw(){
 
     // 長さ拘束（複数回）— tip側にバイアス
     for (let k=0; k<ITER; k++){
-      constraintBias(root, mid, REST, /*lockA=*/true,  /*biasToB=*/1.0);      // root固定
-      constraintBias(mid,  tip, REST, /*lockA=*/false, /*biasToB=*/TIP_BIAS); // tip多め
+      constraintBias(root, mid, REST, /*lockA=*/true,  /*biasToB=*/1.0);
+      constraintBias(mid,  tip, REST, /*lockA=*/false, /*biasToB=*/TIP_BIAS);
     }
   }
 
@@ -103,9 +113,19 @@ function draw(){
   strokeWeight(4); noFill();
   for (let r=0; r<NUM_ROPES; r++){
     const [a,b,c] = ropes[r];
-    stroke(cols[r]); beginShape(); vertex(a.x,a.y); vertex(b.x,b.y); vertex(c.x,c.y); endShape();
+    stroke(cols[r]);
+    beginShape();
+    vertex(a.x,a.y); vertex(b.x,b.y); vertex(c.x,c.y);
+    endShape();
     fill(cols[r]); noStroke(); circle(c.x, c.y, 18); noFill();
   }
+
+  // ====== 画面にバージョン表示 ======
+  noStroke(); fill(0,160);
+  rect(10,10,150,36,8);
+  fill(255); textSize(14); textAlign(LEFT,CENTER);
+  text(`ver: ${VERSION}`, 20,28);
+  // ===================================
 
   noStroke(); fill(0);
   text(`tilt:${nf(tiltX,1,2)}  gains M:${MID_GAIN} T:${TIP_GAIN}`, 12, height-16);
@@ -119,7 +139,6 @@ function stepToward(current, target, k, maxStep){
 }
 
 function constraintBias(a, b, rest, lockA, biasToB){
-  // biasToB: 0.5で等分、>0.5でb(下側)を多めに動かす
   let dx = b.x - a.x, dy = b.y - a.y;
   let dist = Math.hypot(dx, dy) || 1;
   let diff = (dist - rest) / dist;
