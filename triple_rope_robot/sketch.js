@@ -2,7 +2,7 @@
 // 目的: 下に行くほど角度が大きい（同方向で tip > lower > mid）
 // 構造: root(固定) - mid - lower - tip
 
-const VERSION = "2025-10-11-02";   // index.html の ?v と一致させる
+const VERSION = "2025-10-11-03";   // index.html の ?v と一致させる
 
 const NUM_ROPES = 3;
 const SEG = 4;               // 0=root,1=mid,2=lower,3=tip
