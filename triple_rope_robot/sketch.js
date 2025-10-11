@@ -1,23 +1,28 @@
-// --- 2-joint ropes (tilt) ---
-// 各ロープ = 根元(0,固定) + 中間(1) + 先端(2)
-// 横: 追従（係数違いで遅れを作る） / 縦: 相対ばね + 減衰
-// 仕上げに各ペア(0-1, 1-2)へ長さ拘束(1ステップ)で突っ張り低減
+// --- 2-joint ropes (tilt) - stiff-fix ---
+// 対策:
+//  A) 根元-中間 / 中間-先端 の長さ拘束を複数回 (ITER=3〜5)
+//  B) driveX の1フレーム移動量を制限 (MAX_STEP)
+//  C) 中間節の曲がりを軽く平滑化 (BEND = 0.08)
 
 const NUM_ROPES = 3;
-const SEG = 3;             // ★ 関節2つ = 点3つ（0=root,1=mid,2=tip）
-const REST = 60;           // 節間の自然長
+const SEG = 3;               // 0=root(固定),1=mid,2=tip
+const REST = 60;             // 節間自然長
 const ANCHOR_Y = 160;
 const SPACING = 90;
 
-const SWAY_AMPL = 180;     // 傾き→左右の最大振れ
-const KX1 = 0.28;          // 中間(1)の横追従
-const KX2 = 0.22;          // 先端(2)の横追従（より遅らせる）
-const KY  = 0.12;          // 縦ばね（共通）
-const DAMP= 0.93;          // 縦減衰
-const SWAY_LP = 0.18;      // 傾きLPF
+const SWAY_AMPL = 160;       // ←少し控えめに（急激な目標で伸びが出やすい）
+const MAX_STEP = 18;         // ←1フレームで mid.x が動ける最大px（抑制）
+const KX1 = 0.22;            // mid 横追従（強すぎると角が出やすい）
+const KX2 = 0.18;            // tip 横追従（midに遅れて追従）
+const KY  = 0.12;            // 縦ばね
+const DAMP= 0.93;            // 縦減衰
+const SWAY_LP = 0.18;        // 傾きLPF
+
+const ITER = 4;              // ← 長さ拘束の反復回数（まずは4、重ければ3）
+const BEND = 0.08;           // ← 中間節の曲がり平滑化（0〜0.15くらい）
 
 let tiltX = 0, swayLP = 0;
-let ropes = []; // ropes[r][i] = {x,y,vy}
+let ropes = []; // [ [root, mid, tip], ... ], 各点 {x,y,vy}
 let cnv;
 
 function setup(){
@@ -44,9 +49,9 @@ function initRopes(){
   const cx = width/2;
   for (let r=0; r<NUM_ROPES; r++){
     const ax = cx + (r-1)*SPACING;
-    const root = { x: ax, y: ANCHOR_Y,       vy: 0 };
-    const mid  = { x: ax, y: ANCHOR_Y+REST,  vy: 0 };
-    const tip  = { x: ax, y: ANCHOR_Y+REST*2,vy: 0 };
+    const root = { x: ax, y: ANCHOR_Y,        vy: 0 };
+    const mid  = { x: ax, y: ANCHOR_Y+REST,   vy: 0 };
+    const tip  = { x: ax, y: ANCHOR_Y+REST*2, vy: 0 };
     ropes.push([root, mid, tip]);
   }
 }
@@ -66,12 +71,19 @@ function draw(){
     root.x = width/2 + (r-1)*SPACING;
     root.y = ANCHOR_Y;
 
-    // ---- 横：追従（係数で“遅れ”を作る）
-    const driveX = root.x + swayLP * SWAY_AMPL; // 目標
-    mid.x += (driveX - mid.x) * KX1;            // 中間は目標に
-    tip.x += (mid.x  - tip.x) * KX2;            // 先端は中間に追従
+    // 目標位置（横）
+    const targetX = root.x + swayLP * SWAY_AMPL;
 
-    // ---- 縦：相対ばね + 減衰（各点が1つ上+RESTへ戻る）
+    // ---- A. 横：追従（中間→目標、先端→中間）
+    // ただし B. mid.x の1フレーム移動量を制限して急激な伸びを防ぐ
+    let desiredMidX = mid.x + (targetX - mid.x) * KX1;
+    let step = desiredMidX - mid.x;
+    if (Math.abs(step) > MAX_STEP) desiredMidX = mid.x + Math.sign(step) * MAX_STEP;
+    mid.x = desiredMidX;
+
+    tip.x += (mid.x - tip.x) * KX2;
+
+    // ---- 縦：相対ばね + 減衰（各点が1つ上+RESTへ）
     const targetY1 = root.y + REST;
     mid.vy = (mid.vy + (targetY1 - mid.y) * KY) * DAMP;
     mid.y += mid.vy;
@@ -80,9 +92,15 @@ function draw(){
     tip.vy = (tip.vy + (targetY2 - tip.y) * KY) * DAMP;
     tip.y += tip.vy;
 
-    // ---- 仕上げ：長さ拘束を各ペアに1回（角の残りを減らす）
-    lengthConstraint(root, mid, REST, /*lockA=*/true);  // root固定
-    lengthConstraint(mid,  tip, REST, /*lockA=*/false); // 両側少しずつ
+    // ---- C. 曲がりを軽く平滑化（midをroot&tipの中点へ少し引く）
+    mid.x = lerp(mid.x, (root.x + tip.x) * 0.5, BEND);
+    mid.y = lerp(mid.y, (root.y + tip.y) * 0.5, BEND*0.6); // yは弱め
+
+    // ---- A. 仕上げ：長さ拘束を複数回
+    for (let k=0; k<ITER; k++){
+      lengthConstraint(root, mid, REST, /*lockA=*/true);  // root固定：midだけ動かす
+      lengthConstraint(mid,  tip, REST, /*lockA=*/false); // 両側少しずつ
+    }
   }
 
   // 描画
@@ -96,16 +114,20 @@ function draw(){
   }
 
   noStroke(); fill(0);
-  text(`tilt:${nf(tiltX,1,2)}  joints:2`, 12, height-16);
+  text(`tilt:${nf(tiltX,1,2)}  iter:${ITER}  stepCap:${MAX_STEP}`, 12, height-16);
 }
 
 function lengthConstraint(a, b, rest, lockA){
   let dx = b.x - a.x, dy = b.y - a.y;
   let dist = Math.hypot(dx, dy) || 1;
   let diff = (dist - rest) / dist;
+
+  // 誤差が小さければスキップ（揺れた末端での微振動を抑える）
+  if (Math.abs(dist - rest) < 0.05) return;
+
   const corrX = dx * 0.5 * diff;
   const corrY = dy * 0.5 * diff;
-  if (!lockA){ a.x += corrX; a.y += corrY; } // 根元側も少し寄せる（lockAなら固定）
+  if (!lockA){ a.x += corrX; a.y += corrY; }
   b.x -= corrX;  b.y -= corrY;
 }
 
