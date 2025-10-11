@@ -1,5 +1,6 @@
 // --- Fixed anchor + soft chain (tilt) ---
-// 根元は固定。上から2節目をswayで横に駆動。キャンバスは固定。
+// 根元は固定。上から2節目をswayで横に駆動。
+// 改良点: ①縦ターゲットを相対化 ②横伝播2パス ③傾きスムージング
 
 const NUM_ROPES = 3;
 const SEG = 12;
@@ -13,7 +14,7 @@ const KX = 0.30;       // それ以降の横追従
 const KY = 0.12;       // 縦のばね
 const DAMP = 0.90;     // 縦速度の減衰
 
-let tiltX = 0;
+let tiltX = 0, swayLP = 0; // ← ③スムージング用
 let ropes = []; // {x,y,vy}
 let canvasRef;
 
@@ -23,6 +24,7 @@ function setup(){
   // キャンバス固定＆スクロール抑止
   canvasRef.position(0, 0);
   canvasRef.style('position', 'fixed');
+  canvasRef.style('inset', '0');
   canvasRef.style('touch-action', 'none');
   document.body.style.margin = '0';
   document.body.style.overscrollBehavior = 'none';
@@ -36,9 +38,12 @@ function setup(){
       DeviceOrientationEvent.requestPermission) {
     const btn = createButton('Enable Tilt');
     btn.position(12,12);
-    btn.mousePressed(async()=>{ try{await DeviceOrientationEvent.requestPermission();}catch(e){} btn.remove(); });
+    btn.mousePressed(async()=>{
+      try{ await DeviceOrientationEvent.requestPermission(); }catch(e){}
+      btn.remove();
+    });
   }
-  window.addEventListener('deviceorientation', e => { tiltX = e.gamma || 0; });
+  window.addEventListener('deviceorientation', e => { tiltX = e.gamma ?? 0; });
 }
 
 function initRopes(){
@@ -57,36 +62,37 @@ function initRopes(){
 function draw(){
   background(245);
 
+  // ③ティルトのスムージング（-1..1）
   const sway = constrain(tiltX/45, -1, 1);
+  swayLP = lerp(swayLP, sway, 0.15);
 
   for (let r=0; r<NUM_ROPES; r++){
     const rope = ropes[r];
-    const anchorX = width/2 + (r-1)*SPACING; // ← ルートは固定
+    const anchorX = width/2 + (r-1)*SPACING; // ルートは固定
     rope[0].x = anchorX;
     rope[0].y = ANCHOR_Y;
 
     // 駆動点 = 2節目(インデックス1) を左右に引く
-    const driveX = anchorX + sway * SWAY_AMPL;
+    const driveX = anchorX + swayLP * SWAY_AMPL;
     rope[1].x += (driveX - rope[1].x) * KX_TOP;
 
-
-    // 2節目の縦：ひとつ上 + REST を目標に（相対）
+    // ①縦ターゲットは「ひとつ上 + REST」の相対目標
     const targetY1 = rope[0].y + REST;
     rope[1].vy = (rope[1].vy + (targetY1 - rope[1].y) * KY) * DAMP;
     rope[1].y  += rope[1].vy;
 
-    // 3節目以降
-    // 横方向の“張り”を少し強めに伝える（前→後、後→前）
+    // ②横伝播を2パス（前→後 を2回）で角を減らす
     for (let pass=0; pass<2; pass++){
-    for (let i=2; i<SEG; i++){
-    rope[i].x += (rope[i-1].x - rope[i].x) * KX;
-   }
- }
+      for (let i=2; i<SEG; i++){
+        rope[i].x += (rope[i-1].x - rope[i].x) * KX;
+      }
+    }
 
-    const targetY = rope[i-1].y + REST;   // ← 相対に変更
-    rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY) * DAMP;
-    rope[i].y  += rope[i].vy;
-  }
+    // 3節目以降：縦ばね（相対）
+    for (let i=2; i<SEG; i++){
+      const targetY = rope[i-1].y + REST;   // ①相対に変更
+      rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY) * DAMP;
+      rope[i].y  += rope[i].vy;
     }
   }
 
