@@ -1,5 +1,5 @@
 // --- 3-joint ropes (tilt) — monotonic bend (cascade targets) ---
-const VERSION = "2025-10-11-03";
+const VERSION = "2025-10-11-04";
 
 const NUM_ROPES = 3;
 const SEG = 4;               // 0=root,1=mid,2=lower,3=tip
