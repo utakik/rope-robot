@@ -1,15 +1,24 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Camera Input Rope Test</title>
-  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
-  <script src="cam-sketch.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Triple Rope Robot – Camera Version</title>
   <style>
-    body, html { margin: 0; padding: 0; background: #000; overflow: hidden; }
+    body, html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+      touch-action: none;
+    }
   </style>
 </head>
 <body>
+  <!-- p5.js 本体 -->
+  <script src="https://unpkg.com/p5@1.9.4/lib/p5.min.js"></script>
+
+  <!-- カメラ入力＋ひも制御のスケッチ -->
+  <script src="./cam-sketch.js"></script>
 </body>
 </html>
