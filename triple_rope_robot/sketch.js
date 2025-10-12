@@ -1,6 +1,6 @@
 // --- 3-joint ropes (tilt) — stable iOS-safe version ---
 
-const VERSION = "2025-10-13-01";   // ★バージョン更新
+const VERSION = "2025-10-12-01";   // ★バージョン更新
 
 const NUM_ROPES = 3;
 const SEG = 4;               // 0=root,1=mid,2=lower,3=tip
