@@ -1,76 +1,68 @@
-// --- 3-joint ropes (tilt) — stable iOS-safe version ---
+// --- tilt-ropes (4 bones) with presets ---
+// 2025-10-12-01
 
-const VERSION = "2025-10-12-01";   // ★バージョン更新
-
+const VERSION = "2025-10-12-02";
 const NUM_ROPES = 3;
-const SEG = 4;               // 0=root,1=mid,2=lower,3=tip
-const REST = 56;
+const SEG = 5;               // ← 骨4本（節点5個）
 const ANCHOR_Y = 160;
 const SPACING = 90;
-
 const SWAY_AMPL = 160;
-const GAIN = [0.3, 1.6, 3.5];
-const KX   = [0.18, 0.22, 0.26];
-const KY   = [0.11, 0.13, 0.15];
-const DAMP = [0.93, 0.92, 0.91];
-const MAX_STEP = [12, 14, 18];
-const ITER = 5;
 const SWAY_LP = 0.1;
-const TIP_BIAS = 0.7;
 
-const DIR_DEADZONE = 10;     // px以内では向きを切り替えない
-const MONO_BLEND0  = 12;
-const MONO_BLEND1  = 60;
+// === プリセット群 ===
+const PRESETS = {
+  soft: {
+    KX:   [0.15,0.17,0.19,0.21,0.24],
+    KY:   [0.10,0.11,0.12,0.13,0.14],
+    DAMP: [0.94,0.94,0.94,0.93,0.93],
+    REST: 48, ITER: 6, TIP_BIAS: 0.7
+  },
+  crisp: {
+    KX:   [0.18,0.20,0.22,0.25,0.28],
+    KY:   [0.11,0.12,0.13,0.14,0.15],
+    DAMP: [0.93,0.93,0.92,0.92,0.91],
+    REST: 44, ITER: 5, TIP_BIAS: 0.7
+  },
+  tail: {
+    KX:   [0.16,0.18,0.20,0.23,0.27],
+    KY:   [0.10,0.11,0.12,0.13,0.15],
+    DAMP: [0.94,0.94,0.93,0.93,0.92],
+    REST: 48, ITER: 6, TIP_BIAS: 0.75
+  }
+};
 
-// --- new global vars for tilt ---
-let betaDeg = 0, gammaDeg = 0, tiltX = 0; // 前後・左右・安定化後
-let swayLP = 0, prevDir = 1;
+// === モード選択（1=soft, 2=crisp, 3=tail） ===
+let MODE = "tail";
+let cfg = PRESETS[MODE];
+
+// === 一般パラメータ ===
+const GAIN = [0.3, 1.3, 2.4, 3.5];
+const DIR_DEADZONE = 10;
+const MONO_BLEND0 = 12;
+const MONO_BLEND1 = 60;
+
+let tiltX = 0, swayLP = 0, prevDir = 1;
 let ropes = [];
 let cnv;
 
-// --- event listener outside setup() ---
-window.addEventListener('deviceorientation', (e) => {
-  betaDeg  = e.beta  ?? 0;   // 前後
-  gammaDeg = e.gamma ?? 0;   // 左右
-  tiltX    = computeStableLR(betaDeg, gammaDeg);
-});
-
-// --- helper: compute stable left/right tilt independent of orientation ---
-function computeStableLR(beta, gamma){
-  // 端末が上向き/下向きでも左右が反転しないよう安定化
-  let g = constrain(gamma, -90, 90);
-  let b = constrain(beta, -180, 180);
-  // beta>0: 端末が前に倒れている。裏返し補正
-  let sign = cos(radians(b)) >= 0 ? 1 : -1;
-  return g * sign;
-}
-
 function setup(){
   cnv = createCanvas(windowWidth, windowHeight);
-  cnv.position(0,0);
-  cnv.style('position','fixed');
-  cnv.style('inset','0');
-  cnv.style('touch-action','none');
-  document.body.style.margin='0';
-  document.body.style.overscrollBehavior='none';
+  cnv.position(0,0); cnv.style('position','fixed'); cnv.style('inset','0'); cnv.style('touch-action','none');
+  document.body.style.margin='0'; document.body.style.overscrollBehavior='none';
   window.addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
   pixelDensity(1);
 
   initRopes();
 
-  // --- iOS permission button ---
+  // iOS tilt permission
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       DeviceOrientationEvent.requestPermission) {
     const btn = createButton('Enable Tilt');
     btn.position(12,12);
-    btn.mousePressed(async()=>{
-      try{ await DeviceOrientationEvent.requestPermission(); }
-      catch(e){}
-      btn.remove();
-    });
+    btn.mousePressed(async()=>{ try{await DeviceOrientationEvent.requestPermission();}catch(e){} btn.remove(); });
   }
+  window.addEventListener('deviceorientation', e => { tiltX = e.gamma ?? 0; });
 
-  window.__APP_VERSION__ = VERSION;
   document.title = `tilt-ropes ${VERSION}`;
   console.log("App version:", VERSION);
 }
@@ -80,58 +72,59 @@ function initRopes(){
   const cx = width/2;
   for (let r=0; r<NUM_ROPES; r++){
     const ax = cx + (r-1)*SPACING;
-    ropes.push([
-      { x: ax, y: ANCHOR_Y,          vy: 0 },
-      { x: ax, y: ANCHOR_Y + REST,   vy: 0 },
-      { x: ax, y: ANCHOR_Y + REST*2, vy: 0 },
-      { x: ax, y: ANCHOR_Y + REST*3, vy: 0 },
-    ]);
+    const arr = [];
+    for (let i=0; i<SEG; i++){
+      arr.push({ x: ax, y: ANCHOR_Y + i*cfg.REST, vy: 0 });
+    }
+    ropes.push(arr);
   }
 }
 
 function draw(){
   background(245);
-
-  const sway = constrain(tiltX/45, -1, 1);
-  swayLP = lerp(swayLP, sway, SWAY_LP);
+  swayLP = lerp(swayLP, constrain(tiltX/45,-1,1), SWAY_LP);
 
   for (let r=0; r<NUM_ROPES; r++){
     const rope = ropes[r];
     const root = rope[0];
     root.x = width/2 + (r-1)*SPACING;
     root.y = ANCHOR_Y;
-
     const baseX = root.x + swayLP * SWAY_AMPL;
     const delta = baseX - root.x;
 
-    // 横方向追従
+    // --- 横追従 ---
     for (let i=1; i<SEG; i++){
       const targetX = root.x + delta * GAIN[i-1];
-      rope[i].x = stepToward(rope[i].x, targetX, KX[i-1], MAX_STEP[i-1]);
+      rope[i].x += (targetX - rope[i].x) * cfg.KX[i-1];
     }
 
-    // 単調制約（反転防止）
-    const dir = Math.abs(delta) > DIR_DEADZONE ? Math.sign(delta) : prevDir;
+    // ★ 単調性補正
+    const dir = Math.abs(delta)>DIR_DEADZONE?Math.sign(delta):prevDir;
     prevDir = dir;
     const w = smoothstep(MONO_BLEND0, MONO_BLEND1, Math.abs(delta));
-    enforceMonotonicXWeighted(rope, dir, w);
+    enforceMonotonicXWeighted(rope, dir, w*0.8);
 
-    // 縦方向ばね
+    // --- 縦のばね ---
     for (let i=1; i<SEG; i++){
-      const targetY = rope[i-1].y + REST;
-      rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * KY[i-1]) * DAMP[i-1];
+      const targetY = rope[i-1].y + cfg.REST;
+      rope[i].vy = (rope[i].vy + (targetY - rope[i].y) * cfg.KY[i-1]) * cfg.DAMP[i-1];
       rope[i].y  += rope[i].vy;
     }
 
-    // 長さ拘束
-    for (let k=0; k<ITER; k++){
+    // --- 拘束ITER回 ---
+    for (let k=0; k<cfg.ITER; k++){
       for (let i=1; i<SEG; i++){
-        constraintBias(rope[i-1], rope[i], REST, (i===1), TIP_BIAS);
+        constraintBias(rope[i-1], rope[i], cfg.REST, (i===1), cfg.TIP_BIAS);
       }
     }
   }
 
-  // 描画
+  drawRopes();
+  drawHUD();
+}
+
+// --- 描画まわり ---
+function drawRopes(){
   const cols = [color(0,0,0,220), color(70,140,255,220), color(240,70,70,220)];
   strokeWeight(4); noFill();
   for (let r=0; r<NUM_ROPES; r++){
@@ -142,20 +135,14 @@ function draw(){
     const tip = rope[SEG-1];
     fill(cols[r]); noStroke(); circle(tip.x, tip.y, 18); noFill();
   }
-
-  // バージョン表示
-  noStroke(); fill(0,160);
-  rect(10,10,150,36,8);
-  fill(255); textSize(14); textAlign(LEFT,CENTER);
-  text(`ver: ${VERSION}`, 20,28);
 }
 
-// --- utility functions ---
-function stepToward(current, target, k, maxStep){
-  let next = current + (target - current) * k;
-  let d = next - current;
-  if (Math.abs(d) > maxStep) next = current + Math.sign(d) * maxStep;
-  return next;
+function drawHUD(){
+  noStroke(); fill(0,160);
+  rect(10,10,200,44,8);
+  fill(255); textSize(14); textAlign(LEFT,CENTER);
+  text(`ver: ${VERSION}`, 20,26);
+  text(`mode: ${MODE}`, 20,42);
 }
 
 function enforceMonotonicXWeighted(rope, dir, w){
@@ -169,20 +156,28 @@ function enforceMonotonicXWeighted(rope, dir, w){
   }
 }
 
-function constraintBias(a, b, rest, lockA, biasToB){
-  let dx = b.x - a.x, dy = b.y - a.y;
-  let dist = Math.hypot(dx, dy) || 1;
-  let diff = (dist - rest) / dist;
-  if (Math.abs(dist - rest) < 0.05) return;
-  const wb = biasToB;
-  const wa = lockA ? 0 : (1 - wb);
-  b.x -= dx * wb * diff; b.y -= dy * wb * diff;
-  if (!lockA){ a.x += dx * wa * diff; a.y += dy * wa * diff; }
+function constraintBias(a,b,rest,lockA,biasToB){
+  let dx=b.x-a.x, dy=b.y-a.y;
+  let dist=Math.hypot(dx,dy)||1;
+  let diff=(dist-rest)/dist;
+  if(Math.abs(dist-rest)<0.05)return;
+  const wb=biasToB;
+  const wa=lockA?0:(1-wb);
+  b.x-=dx*wb*diff; b.y-=dy*wb*diff;
+  if(!lockA){ a.x+=dx*wa*diff; a.y+=dy*wa*diff; }
 }
 
-function smoothstep(a, b, x){
-  const t = constrain((x - a) / (b - a), 0, 1);
-  return t * t * (3 - 2 * t);
+function smoothstep(a,b,x){
+  const t=constrain((x-a)/(b-a),0,1);
+  return t*t*(3-2*t);
+}
+
+function keyPressed(){
+  if(key==='1') MODE="soft";
+  if(key==='2') MODE="crisp";
+  if(key==='3') MODE="tail";
+  cfg = PRESETS[MODE];
+  console.log("Switched to:", MODE);
 }
 
 function windowResized(){ resizeCanvas(windowWidth, windowHeight); initRopes(); }
