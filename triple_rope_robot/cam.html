@@ -2,23 +2,32 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Triple Rope Robot – Camera Version</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Triple Rope Robot – Camera Overlay</title>
   <style>
-    body, html {
+    html, body {
       margin: 0;
       padding: 0;
-      overflow: hidden;
       background: #000;
-      touch-action: none;
+      overflow: hidden;            /* スクロール抑止 */
+      touch-action: none;          /* タッチでページが動かない */
+    }
+    /* p5のキャンバスを画面固定に */
+    canvas {
+      position: fixed !important;
+      inset: 0 !important;
+      display: block;
     }
   </style>
 </head>
 <body>
-  <!-- p5.js 本体 -->
+  <!-- p5.js 本体（CDN） -->
   <script src="https://unpkg.com/p5@1.9.4/lib/p5.min.js"></script>
 
-  <!-- カメラ入力＋ひも制御のスケッチ -->
+  <!-- 1) カメラ入力：window.tiltX を公開（audio:false でマイク拒否） -->
   <script src="./cam-sketch.js"></script>
+
+  <!-- 2) ロープ描画：tiltX（外部があればそれを優先）を利用 -->
+  <script src="./sketch.js"></script>
 </body>
 </html>
