@@ -127,7 +127,7 @@ function updateSwayFromCamera(){
   if (sum>1){
     const cx = sumX/sum;                 // 0..vw-1
     const norm = map(cx, 0, vw-1, -1, 1); // 左=-1 右=+1
-    swayLP = lerp(swayLP, norm, SWAY_LP);
+    swayLP = lerp(swayLP, -norm, SWAY_LP);  // ← 左右を反転！
   }
 }
 
