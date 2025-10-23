@@ -10,7 +10,7 @@ const ANCHOR_Y = 160;
 const SPACING = 90;
 
 // 見た目と動きの軽いプリセット
-const KX   = [0.16, 0.18, 0.20, 0.23];
+const KX   = [0.16, 0.18, 0.20, 0.30];
 const KY   = [0.10, 0.11, 0.12, 0.13];
 const DAMP = [0.94, 0.94, 0.93, 0.93];
 const REST = 48, ITER = 6, TIP_BIAS = 0.72;
