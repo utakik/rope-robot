@@ -1,7 +1,7 @@
 // --- tilt-ropes (4 bones) with presets ---
 // 2025-10-12-01
 
-const VERSION = "2025-10-12-02";
+const VERSION = "2025-10-23";
 const NUM_ROPES = 3;
 const SEG = 5;               // ← 骨4本（節点5個）
 const ANCHOR_Y = 160;
@@ -12,7 +12,7 @@ const SWAY_LP = 0.1;
 // === プリセット群 ===
 const PRESETS = {
   soft: {
-    KX:   [0.15,0.17,0.19,0.21,0.24],
+    KX:   [0.15,0.17,0.19,0.21,0.30],
     KY:   [0.10,0.11,0.12,0.13,0.14],
     DAMP: [0.94,0.94,0.94,0.93,0.93],
     REST: 48, ITER: 6, TIP_BIAS: 0.7
