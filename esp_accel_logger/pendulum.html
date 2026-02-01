@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Pendulum Monitor</title>
+  <style>
+    body { font-family:sans-serif; background:#111; color:#0f0; margin:0; padding:12px; }
+    canvas { background:#222; border:1px solid #444; width:100%; max-width:900px; height:420px; display:block; }
+    #status { font-family:monospace; margin:10px 0; color:#ff0; white-space:pre; }
+    button { padding:10px 14px; margin-right:8px; }
+  </style>
+</head>
+<body>
+  <h2>Pendulum Monitor</h2>
+  <canvas id="canvas" width="900" height="420"></canvas>
+  <div id="status">Waiting for data...</div>
+  <div>
+    <button onclick="fetch(ESP_BASE + '/start')">START</button>
+    <button onclick="fetch(ESP_BASE + '/stop')">STOP</button>
+    <button onclick="downloadCSV()">Download CSV</button>
+    <button onclick="location.reload()">Clear</button>
+  </div>
+
+<script>
+  // ★ここを書き換え（ESPのIP）
+  const ESP_BASE = 'http://10.47.14.143';
+
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // ログ（ブラウザ側で保持→CSV化）
+  let dataLog = [];
+  const maxPoints = 250;
+
+  // 表示スケール
+  const ACCEL_SCALE = 10;  // m/s^2 → px
+  const ANGLE_SCALE = 3;   // deg → px
+
+  // 欠落検出（見える化）
+  let last_t_us = null;
+  let dropCount = 0;
+  const EXPECT_US = 1000000 / 50;     // ESP側50Hz想定
+  const DROP_TH   = EXPECT_US * 1.8;  // これ以上なら「飛び」っぽい
+
+  function draw() {
+    if (dataLog.length < 2) return;
+
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // 中心線
+    ctx.strokeStyle = '#444';
+    ctx.beginPath();
+    ctx.moveTo(0, H/2);
+    ctx.lineTo(W, H/2);
+    ctx.stroke();
+
+    const displayData = dataLog.slice(-maxPoints);
+
+    // 角度（黄色）
+    ctx.strokeStyle = '#ff0';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    displayData.forEach((d, idx) => {
+      const xPos = (W / maxPoints) * idx;
+      const yPos = H/2 - (d.angle_deg * ANGLE_SCALE);
+      if (idx === 0) ctx.moveTo(xPos, yPos);
+      else ctx.lineTo(xPos, yPos);
+    });
+    ctx.stroke();
+
+    // 加速度（X赤/Y緑/Z青）
+    const colors = ['#f55', '#5f5', '#5af'];
+    const axes = ['ax', 'ay', 'az'];
+    axes.forEach((axis, i) => {
+      ctx.strokeStyle = colors[i];
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      displayData.forEach((d, idx) => {
+        const xPos = (W / maxPoints) * idx;
+        const yPos = H/2 - (d[axis] * ACCEL_SCALE);
+        if (idx === 0) ctx.moveTo(xPos, yPos);
+        else ctx.lineTo(xPos, yPos);
+      });
+      ctx.stroke();
+    });
+  }
+
+  // 取得周期（表示・fetchは現状まとめて動かしている）
+  const FETCH_MS = 50;
+
+  setInterval(() => {
+    fetch(ESP_BASE + '/data')
+      .then(r => r.json())
+      .then(j => {
+        const s = document.getElementById('status');
+
+        if (j.error) {
+          s.innerText = "SENSOR ERROR";
+          s.style.color = "red";
+          return;
+        }
+        if (j.running === false) {
+          s.innerText = "PAUSED";
+          s.style.color = "yellow";
+          return;
+        }
+
+        // 欠落検出（t_usのギャップを見る）
+        let dtFixed = 0;
+        if (last_t_us !== null) {
+          let dt = j.t_us - last_t_us;
+          dtFixed = (dt >= 0) ? dt : (dt + 4294967296); // micros巻き戻り対策
+          if (dtFixed > DROP_TH) dropCount++;
+        }
+        last_t_us = j.t_us;
+
+        s.style.color = "#0f0";
+        s.innerText =
+          `t_us:${j.t_us}  dt_us:${dtFixed.toFixed(0)}  drops:${dropCount}\n` +
+          `angle:${j.angle_deg.toFixed(2)} deg\n` +
+          `a  ax:${j.ax.toFixed(2)} ay:${j.ay.toFixed(2)} az:${j.az.toFixed(2)} (m/s^2)\n` +
+          `g  gx:${j.gx.toFixed(2)} gy:${j.gy.toFixed(2)} gz:${j.gz.toFixed(2)} (rad/s)`;
+
+        dataLog.push({
+          t_us: j.t_us,
+          ax: j.ax, ay: j.ay, az: j.az,
+          gx: j.gx, gy: j.gy, gz: j.gz,
+          angle_deg: j.angle_deg,
+          drops: dropCount
+        });
+        if (dataLog.length > 5000) dataLog.shift();
+
+        draw();
+      })
+      .catch(e => {
+        const s = document.getElementById('status');
+        s.style.color = "red";
+        s.innerText = "OFFLINE: " + e;
+      });
+  }, FETCH_MS);
+
+  function downloadCSV() {
+    let csv = 't_us,ax,ay,az,gx,gy,gz,angle_deg,drops\n';
+    dataLog.forEach(d => {
+      csv += `${d.t_us},${d.ax},${d.ay},${d.az},${d.gx},${d.gy},${d.gz},${d.angle_deg},${d.drops}\n`;
+    });
+    const blob = new Blob([csv], {type:'text/csv'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'pendulum_data.csv';
+    a.click();
+  }
+</script>
+</body>
+</html>
